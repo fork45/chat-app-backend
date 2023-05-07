@@ -1,7 +1,6 @@
 import mysql from "mysql";
 import crypto, { createHash } from "crypto";
 import { User, generateToken } from "./users";
-import { Conversation, generateKey } from "./conversations";
 import { Socket } from "socket.io";
 
 export class DatabaseService {
@@ -27,55 +26,6 @@ export class DatabaseService {
         })
 
         this.connection.query("alter create table users (uuid varchar(255), token varchar(50), password varchar(100), name varchar(255), nickname varchar(255), status tinyint)");
-        this.connection.query("alter create table conversations (key varchar(255), taken BOOLEAN, firstUser varchar(255), secondUser varchar(255))");
-    }
-
-    /**
-     * 
-     * @param {string} uuid
-     * @returns {string}
-     */
-    async createConversation(uuid) {
-        const key = generateKey();
-
-        data = [key, false, uuid, null]
-
-        this.connection.query("insert into users (key, taken, firstUser, secondUser) values (?, ?, ?, ?)", data);
-        this.connection.commit();
-
-        return key;
-    }
-
-    /**
-     * 
-     * @param {string} uuid
-     * @param {Socket} socket
-     */
-    async JoinConversation(key, socket) {
-        let conversation = this.getConversation(key)
-        
-        if (!conversation) return -1;
-        else if (conversation.taken) return -1;
-
-        this.connection.query("update conversations set secondUser = ? where key = ?", [socket.data.uuid, key]);
-        this.connection.commit();
-
-        return conversation;
-    }
-
-    /**
-     * 
-     * @param {string} key 
-     * @param {Socket} socket 
-     */
-    async takeConversation(key) {
-        this.connection.query("update conversations set taken = true where key = ?", [key], error => {
-            if (error) throw error;
-        });
-        
-        this.connection.commit((error) => {
-            if (error) throw error;
-        });
     }
 
     /**
@@ -106,64 +56,6 @@ export class DatabaseService {
         })
 
         return userObject;
-    }
-
-    /**
-     * 
-     * @param {string} key 
-     * @param {Socket} socket
-     */
-    async deleteConversation(key, socket) {
-        let conversation = await this.getConversation(key);
-
-        if (!conversation) return -1;
-        else if (!(key in socket.rooms)) return -2;
-
-        this.connection.query("delete from conversations where key = ?", [key], error => {
-            if (error) throw error;
-        })
-
-        this.connection.commit(callback = error => {
-            if (error) throw error;
-        })
-    }
-
-    /**
-     * This used when one of the participants destroy the connection to the server
-     * @param {string} key
-     */
-    async forcedDeleteConversation(key) {
-        let conversation = await this.getConversation(key);
-
-        if (!conversation) return -1;
-
-        this.connection.query("delete from conversations where key = ?", [key], error => {
-            if (error) throw error;
-        })
-
-        this.connection.commit(callback = error => {
-            if (error) throw error;
-        })
-    }
-
-    /**
-     * 
-     * @param {string} key 
-     * @returns {Conversation | null}
-     */
-    async getConversation(key) {
-        let data = null;
-        this.connection.query("select * from conversations where key = ?", [key], (error, response) => {
-            if (error) throw error;
-            data = response;
-        });
-
-        if (data === null) return data;
-
-        data.firstUser = this.getUserWithUUID(uuid = data.firstUser);
-        data.secondUser = this.getUserWithUUID(uuid = data.secondUser);
-
-        return new Conversation(data);
     }
 
     /**
@@ -213,33 +105,17 @@ export class DatabaseService {
 
     /**
      * Checks if nickname is not taken and fits to name regex
-     * @param {string} nickname
+     * @param {string} name
      * @returns {void} returns is nickname taken and fits to name regex
      */
-    checkName(nickname) {
+    checkName(name) {
         const regex = new RegExp("^[a-zA-Z0-9_-]+$")
-        if (!(regex.test(nickname))) return false;
+        if (!(regex.test(name))) return false;
 
-        let userCount = this.connection.query("select count(*) from users where nicname = ?", [nickname])
+        let userCount = this.connection.query("select count(*) from users where name = ?", [nickname])
         if (userCount >= 1) return false;
 
         return true
-    }
-
-    /**
-     * Check if conversation is taken
-     * @param {string} key 
-     * @returns {boolean | null} Is conversation taken or not (returns null if conversation not found)
-     */
-    isTaken(key) {
-        let taken = null;
-
-        this.connection.query("select taken from conversations where key = ?", [key], (error, response) => {
-            if (error) throw error;
-            taken = response;
-        })
-
-        return taken;
     }
 
     /**
