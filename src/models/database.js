@@ -1,9 +1,9 @@
 import mysql from "mysql";
 import crypto, { createHash } from "crypto";
 import { User, generateToken } from "./users";
-import { Socket } from "socket.io";
 
 export class DatabaseService {
+
     constructor(host, user, password) {
         this.connection = mysql.createConnection({
             host: host,
@@ -15,7 +15,12 @@ export class DatabaseService {
             if (err) throw err;
             console.log("connected to database");
         })
-        let databases = this.connection.query("select name from master.sys.databases");
+        let databases;
+        this.connection.query("select name from master.sys.databases", (error, results) => {
+            if (error) throw error;
+            databases = results;
+        });
+
         if (!("main" in databases)) this.connection.query("create database main");
 
         this.connection = mysql.createConnection({
@@ -25,7 +30,9 @@ export class DatabaseService {
             database: "main"
         })
 
-        this.connection.query("alter create table users (uuid varchar(255), token varchar(50), password varchar(100), name varchar(255), nickname varchar(255), status tinyint)");
+        this.connection.query("alter table users add column uuid varchar(255); add column token varchar(50); add column password varchar(100); add column name varchar(255); add column nickname varchar(255); add column status tinyint)");
+        // Messages that were sent when the recipient was offline
+        this.connection.query("alter table standing add column user varchar(255); add column receiver varchar(255); add column content varchar(900))")
     }
 
     /**
@@ -61,19 +68,19 @@ export class DatabaseService {
     /**
      * 
      * @param {string} token 
-     * @returns {User | null}
+     * @returns {User | undefined}
      */
     async getUserWithToken(token) {
         let tokenHash = crypto.createHash("sha256").update(token).digest("hex").toString();
 
-        let data = null; 
-        this.connection.query("select * from users where token = ?", [tokenHash], (error, response) => {
+        let data = undefined;
+        this.connection.query("select * from users where token = ?", [tokenHash], (error, results) => {
             if (error) throw error;
-            data = response;
+            data = results.at(0);
         });
 
-        if (data === null) {
-            return null;
+        if (data === undefined) {
+            return data;
         }
 
         data.token = token
@@ -83,24 +90,58 @@ export class DatabaseService {
 
     /**
      * 
-     * @param {string} uuid
+     * @param {uuid} uuid
      * @returns {User | null}
      */
     async getUserWithUUID(uuid) {
-
-        let data = null;
-        this.connection.query("select * from users where uuid = ?", [uuid], (error, response) => {
+        let data = undefined;
+        this.connection.query("select * from users where uuid = ?", [uuid], (error, results) => {
             if (error) throw error;
-            data = response;
+            data = results.at(0);
         });
 
-        if (data === null) {
-            return null;
+        if (data === undefined) {
+            return data;
         }
 
         data.token = null
 
         return new User(data);
+    }
+
+    /**
+     * 
+     * @param {string} uuid
+     * @param {boolean} deleteAfter
+     */
+    async getUserStandingMessages(uuid, deleteAfter = true) {
+        let messages = [];
+        
+        this.connection.query("select user, content from standing where to = ?", [uuid], (error, results) => {
+            if (error) throw error;
+            messages = results;
+        })
+        
+        if (deleteAfter) {
+            this.connection.query("delete from standing where to = ?", [uuid], error => {
+                if (error) throw error;
+            })
+        }
+
+        return messages;
+    }
+
+    /**
+     * 
+     * @param {uuid} user
+     * @param {uuid} receiver
+     * @param {string} content
+     */
+    async addStandingMessage(user, receiver, content) {
+        this.connection.query("insert into standing values (user, receiver, content) (?, ?, ?)", [user, receiver, content], error => {
+            if (error) throw error;
+        });
+        this.connection.commit();
     }
 
     /**
@@ -112,7 +153,11 @@ export class DatabaseService {
         const regex = new RegExp("^[a-zA-Z0-9_-]+$")
         if (!(regex.test(name))) return false;
 
-        let userCount = this.connection.query("select count(*) from users where name = ?", [nickname])
+        let userCount;
+        this.connection.query("select count(*) from users where name = ?", [nickname], (error, results) => {
+            if (error) throw error;
+            userCount = results[0]
+        })
         if (userCount >= 1) return false;
 
         return true

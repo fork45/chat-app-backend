@@ -36,9 +36,39 @@ export function run(serverPort, ioPort, dbHost, dbUser, dbPassword) {
             });
             
             return;
+        } else if (request.body.content.length() > 900) {
+            response.status(400).send({
+                message: "Your message should be not longer than 900 characters"
+            })
         }
 
-        // TODO: Send message
+        let receiverUuid = request.body.receiver
+        let receiver = databaseService.getUserWithUUID(receiverUuid);
+
+        if (!receiver) {
+            response.status(404).send({message: "User not found"});
+            return;
+        }
+
+        let socket = undefined;
+        (await io.fetchSockets()).filter(ioSocket => {
+            if (ioSocket.data.uuid === receiverUuid) {
+                socket = ioSocket;
+                return;
+            }
+        })
+
+        let user = databaseService.getUserWithToken(request.headers.authorization);
+
+        if (socket === undefined) {
+            databaseService.addStandingMessage(user.uuid, receiverUuid, request.body.content);
+            return;
+        }
+
+        socket.emit("message", {
+            user: user.uuid,
+            content: request.body.content
+        });
     })
 
     httpServer.listen(serverPort, () => {
@@ -48,6 +78,16 @@ export function run(serverPort, ioPort, dbHost, dbUser, dbPassword) {
     io.on("connection", async (socket) => {
         socket.data.token = socket.request.headers.authorization
         socket.data.user = await databaseService.getUserWithToken(token=socket.data.token)
+        if (socket.data.user === undefined) {
+            socket.emit("error", {
+                message: "You need account token to make request like this"
+            });
+            socket.disconnect(true);
+            return;
+        }
+
+        let messages = databaseService.getUserStandingMessages(socket.data.user.uuid);
+        socket.emit("standing", messages);
     })
 
     io.listen(ioPort)
