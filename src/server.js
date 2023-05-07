@@ -8,8 +8,8 @@ export function run(serverPort, ioPort, dbHost, dbUser, dbPassword) {
     const databaseService = new DatabaseService(dbHost, dbUser, dbPassword);
 
     httpServer.post("/accounts", async (request, response) => {
-        if (request.body.nickname.length > 255 && request.body.name.length > 255) {
-            response.status(400).send({ message: "Nickname and name can't be long than 255 characters" });
+        if ((request.body.nickname.length > 255 || request.body.nickname.length <= 3) || (request.body.name.length > 255 || request.body.name.length <= 3)) {
+            response.status(400).send({ message: "Nickname or name can't be longer than 255 characters and can't be smaller than 4 characters" });
             return;
         } else if (request.body.password.length < 8) {
             response.status(400).send({ message: "Password length should be long than 8 characters" });
@@ -36,9 +36,9 @@ export function run(serverPort, ioPort, dbHost, dbUser, dbPassword) {
             });
             
             return;
-        } else if (request.body.content.length() > 900) {
+        } else if (request.body.content.length > 900 || request.body.content.length <= 0) {
             response.status(400).send({
-                message: "Your message should be not longer than 900 characters"
+                message: "Your message should not be longer than 900 characters and should not be smaller than 1 character"
             })
         }
 
