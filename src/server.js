@@ -75,6 +75,46 @@ export function run(serverPort, ioPort, dbHost, dbUser, dbPassword) {
         console.log(`Example app is listening on port ${ioPort}`)
     })
 
+    io.of("/status").on("connection", (socket) => {
+        socket.on("subscribe", (request) => {
+            let user = databaseService.getUserWithUUID(request.user);
+            if (!user) {
+                socket.emit("error", { message: "User not found" })
+                return;
+            }
+
+            socket.join(user.uuid);
+        })
+
+        socket.on("unsubscribe", (request) => {
+            let user = databaseService.getUserWithUUID(request.user);
+            if (!user) {
+                socket.emit("error", { message: "User not found" })
+                return;
+            }
+
+            socket.leave(user.uuid);
+        })
+
+        socket.on("change", (request) => {
+            if (!(request.status in ["online", "do not disturb", "hidden"])) {
+                socket.emit("error", {message: "There's only three types of status: online, do not disturb and hidden"});
+            } else if (socket.data.user.status === request.status) {
+                return;
+            }
+
+            databaseService.updateUserStatus(socket.data.user.uuid, request.status);
+            socket.data.user.status = request.status
+
+            if (request.status === "hidden") {
+                io.in(socket.data.uuid).emit("status", {status: "offline"});
+                return;
+            }
+
+            io.in(socket.data.user.uuid).emit("status", request.status);
+        })
+    })
+
     io.on("connection", async (socket) => {
         socket.data.token = socket.request.headers.authorization
         socket.data.user = await databaseService.getUserWithToken(token=socket.data.token)
@@ -88,6 +128,16 @@ export function run(serverPort, ioPort, dbHost, dbUser, dbPassword) {
 
         let messages = databaseService.getUserStandingMessages(socket.data.user.uuid);
         socket.emit("standing", messages);
+
+        if (!(socket.data.user.status in ["hidden", "do not disturb"])) {
+            io.in(socket.data.user.uuid).emit("status", { "status": "online" });
+        } else if (socket.data.user.status === "do not disturb") {
+            io.in(socket.data.user.uuid).emit("status", { "status": "do not disturb" });
+        }
+
+        socket.on("disconnect", (reason) => {
+            io.in(socket.data.user.uuid).emit("status", { "status": "offline" });
+        })
     })
 
     io.listen(ioPort)

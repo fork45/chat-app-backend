@@ -1,5 +1,5 @@
 import mysql from "mysql";
-import crypto, { createHash } from "crypto";
+import crypto, { createHash, UUID } from "crypto";
 import { User, generateToken } from "./users";
 
 export class DatabaseService {
@@ -90,7 +90,7 @@ export class DatabaseService {
 
     /**
      * 
-     * @param {uuid} uuid
+     * @param {UUID} uuid
      * @returns {User | null}
      */
     async getUserWithUUID(uuid) {
@@ -111,7 +111,7 @@ export class DatabaseService {
 
     /**
      * 
-     * @param {string} uuid
+     * @param {UUID} uuid
      * @param {boolean} deleteAfter
      */
     async getUserStandingMessages(uuid, deleteAfter = true) {
@@ -133,12 +133,24 @@ export class DatabaseService {
 
     /**
      * 
-     * @param {uuid} user
-     * @param {uuid} receiver
+     * @param {UUID} user
+     * @param {UUID} receiver
      * @param {string} content
      */
     async addStandingMessage(user, receiver, content) {
         this.connection.query("insert into standing values (user, receiver, content) (?, ?, ?)", [user, receiver, content], error => {
+            if (error) throw error;
+        });
+        this.connection.commit();
+    }
+
+    /**
+     * 
+     * @param {UUID} user 
+     * @param {"online" | "do not disturb" | "hidden"} status 
+     */
+    async updateUserStatus(user, status) {
+        this.connection.query("update users set status = ? where uuid = ?", [status, user], error => {
             if (error) throw error;
         });
         this.connection.commit();
