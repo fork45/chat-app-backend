@@ -24,13 +24,13 @@ export class User {
         this.name = data.name
         this.nickname = data.nickname
         this.token = data.token
-        this.status = intToStatus[data.status]
+        this.status = statuses[data.status]
 
         this.socket = socket
     }
 }
 
-export const intToStatus = {
+export const statuses = {
     0: "online",
     1: "do not disturb",
     2: "hidden",
