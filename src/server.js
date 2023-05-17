@@ -9,15 +9,24 @@ export function run(serverPort, ioPort, dbHost, dbUser, dbPassword) {
 
     httpServer.post("/accounts", async (request, response) => {
         if ((request.body.nickname.length > 255 || request.body.nickname.length <= 3) || (request.body.name.length > 255 || request.body.name.length <= 3)) {
-            response.status(400).send({ message: "Nickname or name can't be longer than 255 characters and can't be smaller than 4 characters" });
+            response.status(400).send({
+                opcode: 4,
+                message: "Your nickname or name must be no longer than 255 letters and no less than 4 letters"
+            });
             return;
         } else if (request.body.password.length < 8) {
-            response.status(400).send({ message: "Password length should be long than 8 characters" });
+            response.status(400).send({
+                opcode: 5,
+                message: "Password length should be long than 8 characters"
+            });
         }
 
         let user = databaseService.addUser();
         if (user === false) {
-            response.status(400).send({ message: "The name must match that regex: ^[a-zA-Z0-9_-]+$" });
+            response.status(400).send({
+                opcode: 6,
+                message: "Your name does not match this regex: ^[a-zA-Z0-9_-]+$"
+            });
             return;
         }
 
@@ -32,13 +41,15 @@ export function run(serverPort, ioPort, dbHost, dbUser, dbPassword) {
     httpServer.post("/send", async (request, response) => {
         if (!request.header("authorization")) {
             response.status(401).send({
-                message: "You need account token to make request like this"
+                opcode: 0,
+                message: "No token in request header"
             });
             
             return;
         } else if (request.body.content.length > 900 || request.body.content.length <= 0) {
             response.status(400).send({
-                message: "Your message should not be longer than 900 characters and should not be smaller than 1 character"
+                opcode: 3,
+                message: "Your message must be no longer than 900 letters and not less than 1 letter"
             })
         }
 
@@ -46,7 +57,10 @@ export function run(serverPort, ioPort, dbHost, dbUser, dbPassword) {
         let receiver = databaseService.getUserWithUUID(receiverUuid);
 
         if (!receiver) {
-            response.status(404).send({message: "User not found"});
+            response.status(404).send({
+                opcode: 2, 
+                message: "Receiver not found"
+            });
             return;
         }
 
@@ -60,7 +74,13 @@ export function run(serverPort, ioPort, dbHost, dbUser, dbPassword) {
 
         let user = databaseService.getUserWithToken(request.headers.authorization);
 
-        if (socket === undefined) {
+        if (!user) {
+            await response.status(401).send( {
+            opcode: 1,
+            message: "Invalid Token"
+        } )
+        }
+        else if (socket === undefined) {
             databaseService.addStandingMessage(user.uuid, receiverUuid, request.body.content);
             return;
         }
@@ -79,7 +99,10 @@ export function run(serverPort, ioPort, dbHost, dbUser, dbPassword) {
         socket.on("subscribe", (request) => {
             let user = databaseService.getUserWithUUID(request.user);
             if (!user) {
-                socket.emit("error", { message: "User not found" })
+                socket.emit("error", {
+                    opcode: 2,
+                    message: "User not found"
+                })
                 return;
             }
 
@@ -89,7 +112,10 @@ export function run(serverPort, ioPort, dbHost, dbUser, dbPassword) {
         socket.on("unsubscribe", (request) => {
             let user = databaseService.getUserWithUUID(request.user);
             if (!user) {
-                socket.emit("error", { message: "User not found" })
+                socket.emit("error", { 
+                    opcode: 2,
+                    message: "User not found"
+                })
                 return;
             }
 
@@ -98,7 +124,9 @@ export function run(serverPort, ioPort, dbHost, dbUser, dbPassword) {
 
         socket.on("change", (request) => {
             if (!(request.status in ["online", "do not disturb", "hidden"])) {
-                socket.emit("error", {message: "There's only three types of status: online, do not disturb and hidden"});
+                socket.emit("error", {
+                    opcode: 7,
+                    message: "There's only three types of status: online, do not disturb and hidden"});
             } else if (socket.data.user.status === request.status) {
                 return;
             }
@@ -116,11 +144,12 @@ export function run(serverPort, ioPort, dbHost, dbUser, dbPassword) {
     })
 
     io.on("connection", async (socket) => {
-        socket.data.token = socket.request.headers.authorization
+        socket.data.token = socket.handshake.auth["token"]
         socket.data.user = await databaseService.getUserWithToken(token=socket.data.token)
         if (socket.data.user === undefined) {
             socket.emit("error", {
-                message: "You need account token to make request like this"
+                opcode: 0,
+                message: "No token in request header"
             });
             socket.disconnect(true);
             return;
