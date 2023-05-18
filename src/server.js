@@ -1,11 +1,51 @@
 import express from "express";
 import { Server } from "socket.io";
 import { DatabaseService } from "./models/database";
+import fs from "fs";
+import path from "path";
 
 export function run(serverPort, ioPort, dbHost, dbUser, dbPassword) {
     const httpServer = express()
     const io = new Server()
     const databaseService = new DatabaseService(dbHost, dbUser, dbPassword);
+
+    httpServer.post("/avatars", async (request, response) => {
+        let user = databaseService.getUserWithToken(request.header("authorization"));
+        if (user === undefined) {
+            response.status(400).send({
+                opcode: 404,
+                message: "User not found"
+            });
+            return;
+        }
+        const file = `../public/${user.uuid}.jpg`
+        response.download(file);
+
+        response.status(201).send();
+    })
+
+    httpServer.get("/avatars", async (request, response) => {
+        let author = databaseService.getUserWithToken(request.header("authorization"));
+        let user = databaseService.getUserWithUUID(request.body.user);
+        if (author === undefined || user === undefined) {
+            response.status(400).send({
+                opcode: 404,
+                message: "User not found"
+            });
+            return;
+        }
+
+        let filePath = path.join("../public/", user.uuid);
+        let stat = fs.statSync(filePath);
+
+        response.writeHead(200, {
+            "Content-Type": "image/jpeg",
+            "Content-Length": stat.size()
+        })
+
+        let readStream = fs.createReadStream(filePath);
+        readStream.pipe(response);
+    })
 
     httpServer.post("/accounts", async (request, response) => {
         if ((request.body.nickname.length > 255 || request.body.nickname.length <= 3) || (request.body.name.length > 255 || request.body.name.length <= 3)) {
