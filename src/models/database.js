@@ -1,10 +1,17 @@
-import mysql from "mysql";
+import { MongoClient } from "mongodb";
 import crypto, { createHash, UUID } from "crypto";
 import { User, generateToken } from "./users";
 
 export class DatabaseService {
 
     constructor(host, user, password) {
+        this.client = new MongoClient()
+
+        this.database = this.client.db("main");
+        this.users = this.database.collection("users");
+        this.messages = this.database.collection("messages");
+
+        /*
         this.connection = mysql.createConnection({
             host: host,
             user: user,
@@ -33,6 +40,7 @@ export class DatabaseService {
         this.connection.query("alter table users add column uuid varchar(255); add column token varchar(50); add column password varchar(100); add column name varchar(255); add column nickname varchar(255); add column status tinyint)");
         // Messages that were sent when the recipient was offline
         this.connection.query("alter table standing add column id varchar(50); add column user varchar(255); add column receiver varchar(255); add column content varchar(900)")
+        */
     }
 
     /**
@@ -51,11 +59,17 @@ export class DatabaseService {
         
         let data = [uuid, tokenHash, passwordHash, name, nickname, 0]
 
-        this.connection.query("insert into users (uuid, token, password, name, nickname, status) values (?, ?, ?, ?, ?)", data);
-        this.connection.commit();
+        await this.users.insertOne({
+            _id: uuid,
+            name: name,
+            nickname: nickname,
+            password: passwordHash,
+            token: tokenHash,
+            status: "online"
+        });
 
         let userObject = new User({
-            uuid: uuid,
+            _id: uuid,
             name: name,
             nickname: nickname,
             token: token,
@@ -73,14 +87,12 @@ export class DatabaseService {
     async getUserWithToken(token) {
         let tokenHash = crypto.createHash("sha256").update(token).digest("hex").toString();
 
-        let data = undefined;
-        this.connection.query("select * from users where token = ?", [tokenHash], (error, results) => {
-            if (error) throw error;
-            data = results.at(0);
+        let data = await this.users.findOne({
+            token: tokenHash
         });
 
-        if (data === undefined) {
-            return data;
+        if (!data) {
+            return undefined;
         }
 
         data.token = token
@@ -94,41 +106,30 @@ export class DatabaseService {
      * @returns {User | null}
      */
     async getUserWithUUID(uuid) {
-        let data = undefined;
-        this.connection.query("select * from users where uuid = ?", [uuid], (error, results) => {
-            if (error) throw error;
-            data = results.at(0);
-        });
+        let data = await this.users.findOne({
+            "_id":  uuid
+        })
 
-        if (data === undefined) {
-            return data;
-        }
-
-        data.token = null
-
-        return new User(data);
+        return data ? new User(data) : undefined;
     }
 
     /**
      * 
-     * @param {UUID} uuid
+     * @param {UUID} user
      * @param {boolean} deleteAfter
      */
-    async getUserStandingMessages(uuid, deleteAfter = true) {
-        let messages = [];
-        
-        this.connection.query("select user, content from standing where to = ?", [uuid], (error, results) => {
-            if (error) throw error;
-            messages = results;
+    async getUserStandingMessages(user, deleteAfter = true) {
+        let messages = this.messages.find({
+            receiver: uuid
         })
-        
+
         if (deleteAfter) {
-            this.connection.query("delete from standing where to = ?", [uuid], error => {
-                if (error) throw error;
+            await this.messages.deleteMany({
+                receiver: uuid
             })
         }
 
-        return messages;
+        return messages ? messages.toArray() : [];
     }
 
     /**
@@ -138,10 +139,12 @@ export class DatabaseService {
      * @param {string} content
      */
     async addStandingMessage(id, user, receiver, content) {
-        this.connection.query("insert into standing values (id, user, receiver, content) (?, ?, ?, ?)", [id, user, receiver, content], error => {
-            if (error) throw error;
+        await this.messages.insertOne({
+            _id: id,
+            user: user,
+            receiver: receiver,
+            content: content
         });
-        this.connection.commit();
     }
 
     /**
@@ -150,10 +153,11 @@ export class DatabaseService {
      * @param {"online" | "do not disturb" | "hidden"} status 
      */
     async updateUserStatus(user, status) {
-        this.connection.query("update users set status = ? where uuid = ?", [status, user], error => {
-            if (error) throw error;
+        await this.users.updateOne({
+            _id: user
+        }, {
+            status: status
         });
-        this.connection.commit();
     }
 
     /**
@@ -161,10 +165,9 @@ export class DatabaseService {
      * @param {string} id 
      */
     async deleteStandingMessage(id) {
-        this.connection.query("delete from standing set where id = ?", [id], error => {
-            if (error) throw error;
+        await this.users.deleteOne({
+            _id: id
         });
-        this.connection.commit();
     }
 
     /**
@@ -176,11 +179,10 @@ export class DatabaseService {
         const regex = new RegExp("^[a-zA-Z0-9_-]+$")
         if (!(regex.test(name))) return false;
 
-        let userCount;
-        this.connection.query("select count(*) from users where name = ?", [nickname], (error, results) => {
-            if (error) throw error;
-            userCount = results[0]
+        let userCount = this.users.countDocuments({
+            name: name
         })
+
         if (userCount >= 1) return false;
 
         return true
@@ -191,7 +193,7 @@ export class DatabaseService {
      * @returns {void}
      */
     destroyConnection() {
-        this.connection.destroy()
+        this.client.close(true);
         delete this
     }
 }

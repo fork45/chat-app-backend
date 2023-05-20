@@ -20,7 +20,7 @@ export class User {
     constructor(data, socket = null) {
         this.data = data
 
-        this.uuid = data.uuid
+        this.uuid = data._id
         this.name = data.name
         this.nickname = data.nickname
         this.token = data.token

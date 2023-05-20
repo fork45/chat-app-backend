@@ -6,10 +6,10 @@ import path from "path";
 import { generateId } from "./models/messages";
 import crypto from "crypto";
 
-export function run(serverPort, ioPort, dbHost, dbUser, dbPassword) {
+export function run(serverPort, ioPort, dbConnectUri) {
     const httpServer = express()
     const io = new Server()
-    const databaseService = new DatabaseService(dbHost, dbUser, dbPassword);
+    const databaseService = new DatabaseService(dbConnectUri);
 
     httpServer.post("/avatars", async (request, response) => {
         let user = databaseService.getUserWithToken(request.header("authorization"));
@@ -63,7 +63,7 @@ export function run(serverPort, ioPort, dbHost, dbUser, dbPassword) {
             });
         }
 
-        let user = databaseService.addUser();
+        let user = databaseService.addUser(request.body.nickname, request.body.name, request.body.password);
         if (user === false) {
             response.status(400).send({
                 opcode: 6,
