@@ -10,37 +10,6 @@ export class DatabaseService {
         this.database = this.client.db("main");
         this.users = this.database.collection("users");
         this.messages = this.database.collection("messages");
-
-        /*
-        this.connection = mysql.createConnection({
-            host: host,
-            user: user,
-            password: password
-        })
-
-        this.connection.connect(err => {
-            if (err) throw err;
-            console.log("connected to database");
-        })
-        let databases;
-        this.connection.query("select name from master.sys.databases", (error, results) => {
-            if (error) throw error;
-            databases = results;
-        });
-
-        if (!("main" in databases)) this.connection.query("create database main");
-
-        this.connection = mysql.createConnection({
-            host: host,
-            user: user,
-            password: password,
-            database: "main"
-        })
-
-        this.connection.query("alter table users add column uuid varchar(255); add column token varchar(50); add column password varchar(100); add column name varchar(255); add column nickname varchar(255); add column status tinyint)");
-        // Messages that were sent when the recipient was offline
-        this.connection.query("alter table standing add column id varchar(50); add column user varchar(255); add column receiver varchar(255); add column content varchar(900)")
-        */
     }
 
     /**
