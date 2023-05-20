@@ -8,3 +8,5 @@
 | 5    | Password length should be long than 8 characters | 400 |
 | 6    | Your name does not match this regex: ^[a-zA-Z0-9_-]+$ | 400
 | 7    | Invalid status, there's only three statuses: online, do not disturb, hidden | 400
+| 8    | Message doesn't exists    | 404
+| 9    | You can't edit this message because you're not an author | 403

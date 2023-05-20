@@ -1,6 +1,7 @@
 import { MongoClient } from "mongodb";
 import crypto, { createHash, UUID } from "crypto";
 import { User, generateToken } from "./users";
+import { Message } from "./messages"
 
 export class DatabaseService {
 
@@ -84,40 +85,6 @@ export class DatabaseService {
 
     /**
      * 
-     * @param {UUID} user
-     * @param {boolean} deleteAfter
-     */
-    async getUserStandingMessages(user, deleteAfter = true) {
-        let messages = this.messages.find({
-            receiver: uuid
-        })
-
-        if (deleteAfter) {
-            await this.messages.deleteMany({
-                receiver: uuid
-            })
-        }
-
-        return messages ? messages.toArray() : [];
-    }
-
-    /**
-     * 
-     * @param {UUID} user
-     * @param {UUID} receiver
-     * @param {string} content
-     */
-    async addStandingMessage(id, user, receiver, content) {
-        await this.messages.insertOne({
-            _id: id,
-            user: user,
-            receiver: receiver,
-            content: content
-        });
-    }
-
-    /**
-     * 
      * @param {UUID} user 
      * @param {"online" | "do not disturb" | "hidden"} status 
      */
@@ -131,12 +98,125 @@ export class DatabaseService {
 
     /**
      * 
+     * @param {UUID} user
+     * @param {UUID} from
+     */
+    async getUserMessages(user, from) {
+        // (author == user or author == from) and (receiver == user or receiver == from)
+        let messages = this.messages.find({
+            type: "message",
+            $and: [
+                { $or: [{ author: user }, { author: from }] },
+                { $or: [{ receiver: user }, { receiver: from }] }
+            ]
+        }, {
+            sort: [ { datetime: -1 } ]
+        });
+
+        return messages ? messages.toArray() : [];
+    }
+
+    /**
+     * @param {string} id
+     * @param {UUID} author
+     * @param {UUID} receiver
+     * @param {string} content
+     */
+    async addMessage(id, author, receiver, content) {
+        await this.messages.insertOne({
+            type: "message",
+            _id: id,
+            author: author,
+            receiver: receiver,
+            content: content,
+            datetime: Math.floor(new Date().getTime() / 1000),
+            editDatetime: null
+        });
+    }
+
+    /**
+     * 
+     * @param {UUID} author 
+     * @param {UUID} receiver 
+     * @param {string} key 
+     */
+    async sendKey(author, receiver, key) {
+        await this.messages.insertOne({
+            type: "key",
+            _id: id,
+            author: author,
+            receiver: receiver,
+            content: key,
+            datetime: Math.floor(new Date().getTime() / 1000)
+        });
+    }
+
+    /**
+     * 
      * @param {string} id 
      */
-    async deleteStandingMessage(id) {
-        await this.users.deleteOne({
+    async deleteMessage(id) {
+        await this.messages.deleteOne({
             _id: id
         });
+    }
+
+    /**
+     * 
+     * @param {string} id 
+     * @param {string} content 
+     */
+    async editMessage(id, content) {
+        await this.messages.updateOne({
+            type: "message",
+            _id: id
+        }, {
+            content: content,
+            editDatetime: Math.floor(new Date().getTime() / 1000)
+        })
+    }
+
+    /**
+     * 
+     * @param {string} id 
+     * @returns {Message}
+     */
+    async getMessage(id) {
+        let data = await this.messages.findOne({
+            type: "message",
+            _id: id
+        })
+
+
+        return data ? new Message(data) : undefined;
+    }
+
+    /**
+     * 
+     * @param {UUID} user 
+     * @param {UUID} author
+     */
+    async haveKey(user, author) {
+        let count = await this.messages.countDocuments({
+            type: "key",
+            author: author,
+            receiver: user
+        });
+
+        return count >= 1 ? true : false;
+    }
+
+    /**
+     * 
+     * @param {string} id 
+     */
+    async messageExists(id) {
+        let count = await this.messages.countDocuments({
+            type: "message",
+            _id: id
+        });
+
+        return count >= 1 ? true : false;
     }
 
     /**

@@ -8,3 +8,19 @@ function generateId() {
 
     return randchars.join('');
 }
+
+export class Message {
+
+    constructor(data) {
+        this.data = data
+
+        this._id = data._id
+        this.content = data.content
+        this.type = "message"
+        this.author = data.author
+        this.receiver = data.receiver
+        this.datetime = new Date(data.datetime * 1000);
+        this.editDatetime = data.datetime ? new Date(data.editDatetime * 1000) : null;
+    }
+
+}

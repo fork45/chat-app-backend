@@ -1,4 +1,4 @@
-import express, { response } from "express";
+import express from "express";
 import { Server } from "socket.io";
 import { DatabaseService } from "./models/database";
 import fs from "fs";
@@ -80,7 +80,7 @@ export function run(serverPort, ioPort, dbConnectUri) {
         });
     })
 
-    httpServer.post("/code", async (request, response) => {
+    httpServer.post("/key", async (request, response) => {
         if (!request.header("authorization")) {
             response.status(401).send({
                 opcode: 0,
@@ -128,17 +128,56 @@ export function run(serverPort, ioPort, dbConnectUri) {
                 message: "Invalid Token"
             })
             return;
-        } else if (socket === undefined) {
-            databaseService.addStandingMessage(0, user.uuid, receiver.uuid, request.body.key);
+        }
+
+        databaseService.sendKey(user.uuid, receiver.uuid, request.body.key);
+
+        if (socket) {
+            socket.emit("key", {
+                key: request.body.key,
+                user: user.uuid
+            })            
+        }
+
+
+        response.status(204).send()
+    })
+
+    httpServer.get("/messages", async (request, response) => {
+        if (!request.header("authorization")) {
+            response.status(401).send({
+                opcode: 0,
+                message: "No token in request header"
+            });
+
             return;
         }
 
-        socket.emit("code", {
-            key: request.body.key,
-            user: user.uuid
-        })
+        let user = databaseService.getUserWithToken(request.headers.authorization);
 
-        response.status(204).send()
+        if (!user) {
+            await response.status(401).send({
+                opcode: 1,
+                message: "Invalid Token"
+            })
+            return;
+        }
+
+        let interlocutorUuid = request.body.user
+        let interlocutor = databaseService.getUserWithUUID(interlocutorUuid);
+
+        if (!interlocutor) {
+            response.status(404).send({
+                opcode: 2,
+                message: "User not found"
+            });
+
+            return;
+        }
+
+        let messages = databaseService.getUserMessages();
+
+        response.status(200).send(messages);
     })
 
     httpServer.post("/messages", async (request, response) => {
@@ -154,6 +193,16 @@ export function run(serverPort, ioPort, dbConnectUri) {
                 opcode: 3,
                 message: "Your message must be no longer than 900 letters and not less than 1 letter"
             })
+        }
+
+        let user = databaseService.getUserWithToken(request.headers.authorization);
+
+        if (!user) {
+            await response.status(401).send({
+                opcode: 1,
+                message: "Invalid Token"
+            })
+            return;
         }
 
         let receiverUuid = request.body.receiver
@@ -175,32 +224,21 @@ export function run(serverPort, ioPort, dbConnectUri) {
             }
         })
 
-        let user = databaseService.getUserWithToken(request.headers.authorization);
-
         const id = generateId()
 
-        if (!user) {
-            await response.status(401).send( {
-                opcode: 1,
-                message: "Invalid Token"
-            })
-            return;
-        } else if (socket === undefined) {
-            databaseService.addStandingMessage(id, user.uuid, receiverUuid, request.body.content);
-            return;
+        databaseService.addMessage(id, user.uuid, receiverUuid, request.body.content);
+
+        if (socket) {
+            socket.emit("newMessage", {
+                _id: id,
+                user: user.uuid,
+                content: request.body.content
+            });
+
         }
 
-        socket.emit("signal", {
-            type: 1,
-            user: user.uuid,
-            data: {
-                id: id,
-                content: request.body.content
-            }
-        });
-
         response.status(200).send({
-            id: id
+            _id: id
         })
     })
 
@@ -211,6 +249,16 @@ export function run(serverPort, ioPort, dbConnectUri) {
                 message: "No token in request header"
             });
 
+            return;
+        }
+        
+        let user = databaseService.getUserWithToken(request.headers.authorization);
+
+        if (!user) {
+            response.status(401).send({
+                opcode: 1,
+                message: "Invalid Token"
+            })
             return;
         }
 
@@ -232,6 +280,42 @@ export function run(serverPort, ioPort, dbConnectUri) {
                 return;
             }
         })
+        
+        if (!databaseService.messageExists(request.body.id)) {
+            response.status(404).send({
+                opcode: 8,
+                message: "Message doesn't exists"
+            })
+
+            return;
+        }
+
+        databaseService.editMessage(request.body.id);
+
+        if (socket) {
+            socket.emit("deleteMessage", {
+                user: user.uuid,
+                _id: request.body._id
+            });            
+        }
+
+        response.status(204).send();
+    })
+
+    httpServer.patch("/messages", async (request, response) => {
+        if (!request.header("authorization")) {
+            response.status(401).send({
+                opcode: 0,
+                message: "No token in request header"
+            });
+
+            return;
+        } else if (request.body.content.length > 900 || request.body.content.length <= 0) {
+            response.status(400).send({
+                opcode: 3,
+                message: "Your message must be no longer than 900 letters and not less than 1 letter"
+            })
+        }
 
         let user = databaseService.getUserWithToken(request.headers.authorization);
 
@@ -241,18 +325,48 @@ export function run(serverPort, ioPort, dbConnectUri) {
                 message: "Invalid Token"
             })
             return;
-        } else if (socket === undefined) {
-            databaseService.deleteStandingMessage(request.body.id);
-            return;
         }
 
-        socket.emit("signal", {
-            type: 2,
-            user: user.uuid,
-            data: {
-                id: id,
+        let message = databaseService.getMessage(request.body.id);
+        let receiver = databaseService.getUserWithUUID(message.receiver);
+        
+        if (!message) {
+            response.status(404).send({
+                opcode: 8,
+                message: "Message doesn't exists"
+            })
+        } else if (!receiver) {
+            response.status(404).send({
+                opcode: 2,
+                message: "Receiver not found"
+            })
+
+            return;
+        } else if (message.author !== user.uuid) {
+            response.status(403).send({
+                opcode: 9,
+                message: "You can't edit this message because you're not an author"
+            });
+            
+            return;
+        }
+        
+        let socket = undefined;
+        (await io.fetchSockets()).filter(ioSocket => {
+            if (ioSocket.data.uuid === receiver.uuid) {
+                socket = ioSocket;
+                return;
             }
-        });
+        })
+
+        databaseService.editMessage(message._id, request.body.content);
+
+        if (socket) {
+            socket.emit("editMessage", {
+                _id: message._id,
+                content: request.body.content
+            })
+        }
 
         response.status(204).send();
     })
