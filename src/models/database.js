@@ -32,7 +32,7 @@ export class DatabaseService {
 
         this.connection.query("alter table users add column uuid varchar(255); add column token varchar(50); add column password varchar(100); add column name varchar(255); add column nickname varchar(255); add column status tinyint)");
         // Messages that were sent when the recipient was offline
-        this.connection.query("alter table standing add column user varchar(255); add column receiver varchar(255); add column content varchar(900))")
+        this.connection.query("alter table standing add column id varchar(50); add column user varchar(255); add column receiver varchar(255); add column content varchar(900)")
     }
 
     /**
@@ -137,8 +137,8 @@ export class DatabaseService {
      * @param {UUID} receiver
      * @param {string} content
      */
-    async addStandingMessage(user, receiver, content) {
-        this.connection.query("insert into standing values (user, receiver, content) (?, ?, ?)", [user, receiver, content], error => {
+    async addStandingMessage(id, user, receiver, content) {
+        this.connection.query("insert into standing values (id, user, receiver, content) (?, ?, ?, ?)", [id, user, receiver, content], error => {
             if (error) throw error;
         });
         this.connection.commit();
@@ -151,6 +151,17 @@ export class DatabaseService {
      */
     async updateUserStatus(user, status) {
         this.connection.query("update users set status = ? where uuid = ?", [status, user], error => {
+            if (error) throw error;
+        });
+        this.connection.commit();
+    }
+
+    /**
+     * 
+     * @param {string} id 
+     */
+    async deleteStandingMessage(id) {
+        this.connection.query("delete from standing set where id = ?", [id], error => {
             if (error) throw error;
         });
         this.connection.commit();

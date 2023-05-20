@@ -1,8 +1,10 @@
-import express from "express";
+import express, { response } from "express";
 import { Server } from "socket.io";
 import { DatabaseService } from "./models/database";
 import fs from "fs";
 import path from "path";
+import { generateId } from "./models/messages";
+import crypto from "crypto";
 
 export function run(serverPort, ioPort, dbHost, dbUser, dbPassword) {
     const httpServer = express()
@@ -21,7 +23,7 @@ export function run(serverPort, ioPort, dbHost, dbUser, dbPassword) {
         const file = `../public/${user.uuid}.jpg`
         response.download(file);
 
-        response.status(201).send();
+        response.status(204).send();
     })
 
     httpServer.get("/avatars", async (request, response) => {
@@ -78,7 +80,68 @@ export function run(serverPort, ioPort, dbHost, dbUser, dbPassword) {
         });
     })
 
-    httpServer.post("/send", async (request, response) => {
+    httpServer.post("/code", async (request, response) => {
+        if (!request.header("authorization")) {
+            response.status(401).send({
+                opcode: 0,
+                message: "No token in request header"
+            });
+
+            return;
+        }
+
+        try {
+            crypto.publicDecrypt(request.body.key, Buffer.from("TestRsaCryptoMessagePublicKeyDescryptVerification1234567890"));
+        } catch (error) {
+            response.status(400).send({
+                opcode: 8,
+                message: "This is not RSA public key"
+            })
+            
+            return;
+        }
+
+        let receiverUuid = request.body.receiver
+        let receiver = databaseService.getUserWithUUID(receiverUuid);
+
+        if (!receiver) {
+            response.status(404).send({
+                opcode: 2,
+                message: "Receiver not found"
+            });
+            return;
+        }
+
+        let socket = undefined;
+        (await io.fetchSockets()).filter(ioSocket => {
+            if (ioSocket.data.uuid === receiverUuid) {
+                socket = ioSocket;
+                return;
+            }
+        })
+
+        let user = databaseService.getUserWithToken(request.headers.authorization);
+
+        if (!user) {
+            response.status(401).send({
+                opcode: 1,
+                message: "Invalid Token"
+            })
+            return;
+        } else if (socket === undefined) {
+            databaseService.addStandingMessage(0, user.uuid, receiver.uuid, request.body.key);
+            return;
+        }
+
+        socket.emit("code", {
+            key: request.body.key,
+            user: user.uuid
+        })
+
+        response.status(204).send()
+    })
+
+    httpServer.post("/messages", async (request, response) => {
         if (!request.header("authorization")) {
             response.status(401).send({
                 opcode: 0,
@@ -114,21 +177,84 @@ export function run(serverPort, ioPort, dbHost, dbUser, dbPassword) {
 
         let user = databaseService.getUserWithToken(request.headers.authorization);
 
+        const id = generateId()
+
         if (!user) {
             await response.status(401).send( {
-            opcode: 1,
-            message: "Invalid Token"
-        } )
-        }
-        else if (socket === undefined) {
-            databaseService.addStandingMessage(user.uuid, receiverUuid, request.body.content);
+                opcode: 1,
+                message: "Invalid Token"
+            })
+            return;
+        } else if (socket === undefined) {
+            databaseService.addStandingMessage(id, user.uuid, receiverUuid, request.body.content);
             return;
         }
 
-        socket.emit("message", {
+        socket.emit("signal", {
+            type: 1,
             user: user.uuid,
-            content: request.body.content
+            data: {
+                id: id,
+                content: request.body.content
+            }
         });
+
+        response.status(200).send({
+            id: id
+        })
+    })
+
+    httpServer.delete("/messages", async (request, response) => {
+        if (!request.header("authorization")) {
+            response.status(401).send({
+                opcode: 0,
+                message: "No token in request header"
+            });
+
+            return;
+        }
+
+        let receiverUuid = request.body.receiver
+        let receiver = databaseService.getUserWithUUID(receiverUuid);
+
+        if (!receiver) {
+            response.status(404).send({
+                opcode: 2,
+                message: "Receiver not found"
+            });
+            return;
+        }
+
+        let socket = undefined;
+        (await io.fetchSockets()).filter(ioSocket => {
+            if (ioSocket.data.uuid === receiverUuid) {
+                socket = ioSocket;
+                return;
+            }
+        })
+
+        let user = databaseService.getUserWithToken(request.headers.authorization);
+
+        if (!user) {
+            response.status(401).send({
+                opcode: 1,
+                message: "Invalid Token"
+            })
+            return;
+        } else if (socket === undefined) {
+            databaseService.deleteStandingMessage(request.body.id);
+            return;
+        }
+
+        socket.emit("signal", {
+            type: 2,
+            user: user.uuid,
+            data: {
+                id: id,
+            }
+        });
+
+        response.status(204).send();
     })
 
     httpServer.listen(serverPort, () => {
