@@ -144,10 +144,23 @@ export function run(serverPort, ioPort, dbConnectUri) {
     })
 
     httpServer.get("/messages", async (request, response) => {
+        request.body = JSON.parse(request.body);
+
+        if (!request.body.limit) {
+            request.body.limit = 50
+        }
+
         if (!request.header("authorization")) {
             response.status(401).send({
                 opcode: 0,
                 message: "No token in request header"
+            });
+
+            return;
+        } else if (request.body.limit < 1 && request.body.limit > 100) {
+            response.status(400).send({
+                opcode: 12,
+                message: "Limit should be more than 1 and less than 100"
             });
 
             return;
@@ -175,7 +188,7 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
-        let messages = databaseService.getUserMessages();
+        let messages = databaseService.getUserMessages(interlocutor.uuid);
 
         response.status(200).send(messages);
     })
@@ -234,7 +247,6 @@ export function run(serverPort, ioPort, dbConnectUri) {
                 user: user.uuid,
                 content: request.body.content
             });
-
         }
 
         response.status(200).send({
@@ -262,20 +274,21 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
-        let receiverUuid = request.body.receiver
-        let receiver = databaseService.getUserWithUUID(receiverUuid);
+        let message = databaseService.getMessage(request.body.id);
+        let receiver = databaseService.getUserWithUUID(message.receiver);
 
         if (!receiver) {
             response.status(404).send({
                 opcode: 2,
                 message: "Receiver not found"
             });
+
             return;
         }
 
         let socket = undefined;
         (await io.fetchSockets()).filter(ioSocket => {
-            if (ioSocket.data.uuid === receiverUuid) {
+            if (ioSocket.data.uuid === receiver.uuid) {
                 socket = ioSocket;
                 return;
             }
@@ -435,8 +448,8 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
-        let messages = databaseService.getUserStandingMessages(socket.data.user.uuid);
-        socket.emit("standing", messages);
+        // let messages = databaseService.getUserStandingMessages(socket.data.user.uuid);
+        // socket.emit("standing", messages);
 
         if (!(socket.data.user.status in ["hidden", "do not disturb"])) {
             io.in(socket.data.user.uuid).emit("status", { "status": "online" });
@@ -447,6 +460,84 @@ export function run(serverPort, ioPort, dbConnectUri) {
         socket.on("disconnect", (reason) => {
             io.in(socket.data.user.uuid).emit("status", { "status": "offline" });
         })
+
+        socket.on("markReadMessage", async (request) => {
+            if (!(await databaseService.messageExists(request.id))) {
+                socket.emit("error", {
+                    opcode: 8,
+                    message: "Message doesn't exists"
+                });
+
+                return;
+            }
+
+            let message = await databaseService.getMessage(request.id);
+
+            if (message.read) {
+                socket.emit("error", {
+                    opcode: 10,
+                    message: "This message has already been read"
+                });
+
+                return;
+            } else if (message.receiver !== socket.data.user.uuid) {
+                socket.emit("error", {
+                    opcode: 9,
+                    message: "You can't mark this message as read because you're not an receiver"
+                });
+
+                return;
+            }
+
+            await databaseService.markMessageAsRead(message._id);
+
+            let receiver = undefined;
+            (await io.fetchSockets()).filter(ioSocket => {
+                if (ioSocket.data.uuid === message.receiver) {
+                    receiver = ioSocket;
+                    return;
+                }
+            })
+            
+            if (socket) {
+                receiver.emit("readMessage", {
+                    _id: message._id
+                });
+            }
+        });
+
+        socket.on("typing", async (request) => {
+            let user = databaseService.getUserWithUUID(request.user);
+            if (!user) {
+                socket.emit("error", {
+                    opcode: 2,
+                    message: "User not found"
+                });
+                return;
+            } else if (request.seconds < 1 && request.seconds > 10) {
+                socket.emit("error", {
+                    opcode: 11,
+                    message: "Typing can go for at least 1 second and no more than 10 seconds"
+                });
+
+                return;
+            }
+
+            let receiver = undefined;
+            (await io.fetchSockets()).filter(ioSocket => {
+                if (ioSocket.data.uuid === message.receiver) {
+                    receiver = ioSocket;
+                    return;
+                }
+            })
+
+            if (receiver) {
+                receiver.emit("userTyping", {
+                    user: socket.data.user.uuid,
+                    seconds: request.seconds
+                });
+            }
+        });
     })
 
     io.listen(ioPort)

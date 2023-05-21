@@ -21,6 +21,7 @@ export class Message {
         this.receiver = data.receiver
         this.datetime = new Date(data.datetime * 1000);
         this.editDatetime = data.datetime ? new Date(data.editDatetime * 1000) : null;
+        this.read = data.read
     }
 
 }

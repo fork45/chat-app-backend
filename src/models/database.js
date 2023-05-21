@@ -101,7 +101,7 @@ export class DatabaseService {
      * @param {UUID} user
      * @param {UUID} from
      */
-    async getUserMessages(user, from) {
+    async getUserMessages(user, from, limit=50) {
         // (author == user or author == from) and (receiver == user or receiver == from)
         let messages = this.messages.find({
             type: "message",
@@ -110,7 +110,8 @@ export class DatabaseService {
                 { $or: [{ receiver: user }, { receiver: from }] }
             ]
         }, {
-            sort: [ { datetime: -1 } ]
+            limit: limit,
+            sort: [{ datetime: -1 }]
         });
 
         return messages ? messages.toArray() : [];
@@ -130,7 +131,8 @@ export class DatabaseService {
             receiver: receiver,
             content: content,
             datetime: Math.floor(new Date().getTime() / 1000),
-            editDatetime: null
+            editDatetime: null,
+            read: false
         });
     }
 
@@ -218,6 +220,19 @@ export class DatabaseService {
 
         return count >= 1 ? true : false;
     }
+
+    /**
+     * 
+     * @param {string} id
+     * 
+     */
+    async markMessageAsRead(id) {
+        await this.messages.updateOne({
+            _id: id,
+            read: true
+        });
+    }
+
 
     /**
      * Checks if nickname is not taken and fits to name regex

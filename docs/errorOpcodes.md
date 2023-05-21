@@ -9,4 +9,7 @@
 | 6    | Your name does not match this regex: ^[a-zA-Z0-9_-]+$ | 400
 | 7    | Invalid status, there's only three statuses: online, do not disturb, hidden | 400
 | 8    | Message doesn't exists    | 404
-| 9    | You can't edit this message because you're not an author | 403
+| 9    | You can't edit/mark as read this message because you're not an author/receiver | 403
+| 10   | This message has already been read | 400
+| 11   | Typing can go for at least 1 second and no more than 10 seconds | 400
+| 12   | Limit should be more than 1 and less than 100 | 400
