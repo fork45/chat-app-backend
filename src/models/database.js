@@ -35,7 +35,8 @@ export class DatabaseService {
             nickname: nickname,
             password: passwordHash,
             token: tokenHash,
-            status: "online"
+            status: "online",
+            conversationsWith: []
         });
 
         let userObject = new User({
@@ -43,7 +44,8 @@ export class DatabaseService {
             name: name,
             nickname: nickname,
             token: token,
-            status: "online"
+            status: "online",
+            conversationsWith: []
         })
 
         return userObject;
@@ -165,6 +167,21 @@ export class DatabaseService {
 
     /**
      * 
+     * @param {UUID} user
+     * @param {UUID} secondUser
+     */
+    async deleteMessagesInConversation(user, secondUser) {
+        await this.messages.deleteMany({
+            type: "message",
+            "$and": [
+                { $or: [{ author: user }, { author: secondUser }] },
+                { $or: [{ receiver: user }, { receiver: secondUser }] }
+            ]
+        });
+    }
+
+    /**
+     * 
      * @param {string} id 
      * @param {string} content 
      */
@@ -219,6 +236,56 @@ export class DatabaseService {
         });
 
         return count >= 1 ? true : false;
+    }
+
+    /**
+     * 
+     * @param {UUID} user 
+     * @param {UUID} secondUser 
+     */
+    async addConversationToUser(user, secondUser) {
+        await this.users.updateOne({
+            _id: user,
+        }, {
+            "$push": {conversationsWith: secondUser}
+        });
+    }
+
+    /**
+     * 
+     * @param {UUID} user 
+     * @param {UUID} secondUser 
+     */
+    async removeConversationFromUser(user, secondUser) {
+        await this.users.updateOne({
+            _id: user,
+        }, {
+            "$pull": { conversationsWith: secondUser }
+        });
+    }
+
+    /**
+     * @param {string} user
+     * @param {string} secondUser
+     */
+    async hasConversationWith(user, secondUser) {
+        let count = this.users.countDocuments({
+            _id: user,
+            conversationsWith: { "$in": [secondUser] }
+        })
+
+        return count >= 1 ? true : false;
+    }
+
+    /**
+     * @param {string} user
+     */
+    async getUserConversationsWith(user) {
+        let account = await this.users.findOne({
+            _id: user,
+        })
+
+        return account.conversationsWith;
     }
 
     /**

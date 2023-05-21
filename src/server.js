@@ -1,5 +1,5 @@
 import express from "express";
-import { Server } from "socket.io";
+import { Server, Socket } from "socket.io";
 import { DatabaseService } from "./models/database";
 import fs from "fs";
 import path from "path";
@@ -80,6 +80,140 @@ export function run(serverPort, ioPort, dbConnectUri) {
         });
     })
 
+    httpServer.get("/conversations", async (request, response) => {
+        if (!request.header("authorization")) {
+            response.status(401).send({
+                opcode: 0,
+                message: "No token in request header"
+            });
+
+            return;
+        }
+
+        let user = databaseService.getUserWithToken(request.headers.authorization);
+
+        if (!user) {
+            await response.status(401).send({
+                opcode: 1,
+                message: "Invalid Token"
+            });
+
+            return;
+        }
+
+        let users = await databaseService.getUserConversationsWith(user.uuid);
+
+        response.status(200).send(users);
+    })
+
+    httpServer.post("/conversations", async (request, response) => {
+        if (!request.header("authorization")) {
+            response.status(401).send({
+                opcode: 0,
+                message: "No token in request header"
+            });
+
+            return;
+        }
+
+        let author = databaseService.getUserWithToken(request.headers.authorization);
+
+        if (!author) {
+            await response.status(401).send({
+                opcode: 1,
+                message: "Invalid Token"
+            });
+
+            return;
+        }
+
+        let user = databaseService.getUserWithUUID(request.body.user);
+        
+        if (!user) {
+            await response.status(404).send({
+                opcode: 2,
+                message: "User not found"
+            });
+
+            return;
+        } else if (databaseService.hasConversationWith(user.uuid, author.uuid)) {
+            await response.status(400).send({
+                opcode: 13,
+                message: "You already have conversation with this user"
+            })
+
+            return;
+        }
+
+        await databaseService.addConversationToUser(author, user);
+        await databaseService.addConversationToUser(user, author);
+
+        let socket = findSocket(user.uuid);
+
+        if (socket) {
+            socket.emit("newConversation", {
+                user: author.uuid
+            });
+        }
+
+        response.status(204).send();
+    })
+
+    httpServer.delete("/conversations", async (request, response) => {
+        if (!request.header("authorization")) {
+            response.status(401).send({
+                opcode: 0,
+                message: "No token in request header"
+            });
+
+            return;
+        }
+
+        let author = databaseService.getUserWithToken(request.headers.authorization);
+
+        if (!author) {
+            await response.status(401).send({
+                opcode: 1,
+                message: "Invalid Token"
+            });
+
+            return;
+        }
+
+        let user = databaseService.getUserWithUUID(request.body.user);
+
+        if (!user) {
+            await response.status(404).send({
+                opcode: 2,
+                message: "User not found"
+            });
+
+            return;
+        } else if (!databaseService.hasConversationWith(user.uuid, author.uuid)) {
+            await response.status(404).send({
+                opcode: 14,
+                message: "You don't have conversation with this user"
+            })
+
+            return;
+        }
+
+        await databaseService.removeConversationFromUser(author, user);
+        await databaseService.removeConversationFromUser(user, author);
+
+        await databaseService.deleteMessagesInConversation(author, user);
+
+        let socket = findSocket(user.uuid);
+
+        if (socket) {
+            socket.emit("conversationDelete", {
+                user: author.uuid
+            });
+        }
+
+        response.status(204).send();
+    })
+
     httpServer.post("/key", async (request, response) => {
         if (!request.header("authorization")) {
             response.status(401).send({
@@ -112,14 +246,6 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
-        let socket = undefined;
-        (await io.fetchSockets()).filter(ioSocket => {
-            if (ioSocket.data.uuid === receiverUuid) {
-                socket = ioSocket;
-                return;
-            }
-        })
-
         let user = databaseService.getUserWithToken(request.headers.authorization);
 
         if (!user) {
@@ -132,13 +258,14 @@ export function run(serverPort, ioPort, dbConnectUri) {
 
         databaseService.sendKey(user.uuid, receiver.uuid, request.body.key);
 
+        let socket = findSocket(receiverUuid);
+
         if (socket) {
             socket.emit("key", {
                 key: request.body.key,
                 user: user.uuid
             })            
         }
-
 
         response.status(204).send()
     })
@@ -229,17 +356,11 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
-        let socket = undefined;
-        (await io.fetchSockets()).filter(ioSocket => {
-            if (ioSocket.data.uuid === receiverUuid) {
-                socket = ioSocket;
-                return;
-            }
-        })
-
         const id = generateId()
 
         databaseService.addMessage(id, user.uuid, receiverUuid, request.body.content);
+
+        let socket = findSocket(receiverUuid);
 
         if (socket) {
             socket.emit("newMessage", {
@@ -286,13 +407,6 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
-        let socket = undefined;
-        (await io.fetchSockets()).filter(ioSocket => {
-            if (ioSocket.data.uuid === receiver.uuid) {
-                socket = ioSocket;
-                return;
-            }
-        })
         
         if (!databaseService.messageExists(request.body.id)) {
             response.status(404).send({
@@ -304,6 +418,8 @@ export function run(serverPort, ioPort, dbConnectUri) {
         }
 
         databaseService.editMessage(request.body.id);
+
+        let socket = findSocket(receiver.uuid);
 
         if (socket) {
             socket.emit("deleteMessage", {
@@ -364,13 +480,7 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
         
-        let socket = undefined;
-        (await io.fetchSockets()).filter(ioSocket => {
-            if (ioSocket.data.uuid === receiver.uuid) {
-                socket = ioSocket;
-                return;
-            }
-        })
+        let socket = findSocket(receiver.uuid);
 
         databaseService.editMessage(message._id, request.body.content);
 
@@ -389,64 +499,27 @@ export function run(serverPort, ioPort, dbConnectUri) {
     })
 
     io.of("/status").on("connection", (socket) => {
-        socket.on("subscribe", (request) => {
-            let user = databaseService.getUserWithUUID(request.user);
-            if (!user) {
-                socket.emit("error", {
-                    opcode: 2,
-                    message: "User not found"
-                })
-                return;
-            }
-
-            socket.join(user.uuid);
-        })
-
-        socket.on("unsubscribe", (request) => {
-            let user = databaseService.getUserWithUUID(request.user);
-            if (!user) {
-                socket.emit("error", { 
-                    opcode: 2,
-                    message: "User not found"
-                })
-                return;
-            }
-
-            socket.leave(user.uuid);
-        })
-
-        socket.on("change", (request) => {
-            if (!(request.status in ["online", "do not disturb", "hidden"])) {
-                socket.emit("error", {
-                    opcode: 7,
-                    message: "There's only three types of status: online, do not disturb and hidden"});
-            } else if (socket.data.user.status === request.status) {
-                return;
-            }
-
-            databaseService.updateUserStatus(socket.data.user.uuid, request.status);
-            socket.data.user.status = request.status
-
-            if (request.status === "hidden") {
-                io.in(socket.data.uuid).emit("status", {status: "offline"});
-                return;
-            }
-
-            io.in(socket.data.user.uuid).emit("status", request.status);
-        })
     })
 
     io.on("connection", async (socket) => {
         socket.data.token = socket.handshake.auth["token"]
         socket.data.user = await databaseService.getUserWithToken(token=socket.data.token)
+        
         if (socket.data.user === undefined) {
             socket.emit("error", {
                 opcode: 0,
                 message: "No token in request header"
             });
             socket.disconnect(true);
+            
             return;
         }
+
+        databaseService.getUserConversationsWith(socket.data.user.uuid).then(users => {
+            users.array.forEach(user => {
+                socket.join(user);
+            });
+        });
 
         // let messages = databaseService.getUserStandingMessages(socket.data.user.uuid);
         // socket.emit("standing", messages);
@@ -491,15 +564,9 @@ export function run(serverPort, ioPort, dbConnectUri) {
 
             await databaseService.markMessageAsRead(message._id);
 
-            let receiver = undefined;
-            (await io.fetchSockets()).filter(ioSocket => {
-                if (ioSocket.data.uuid === message.receiver) {
-                    receiver = ioSocket;
-                    return;
-                }
-            })
+            let receiver = findSocket(message.receiver);
             
-            if (socket) {
+            if (receiver) {
                 receiver.emit("readMessage", {
                     _id: message._id
                 });
@@ -523,13 +590,7 @@ export function run(serverPort, ioPort, dbConnectUri) {
                 return;
             }
 
-            let receiver = undefined;
-            (await io.fetchSockets()).filter(ioSocket => {
-                if (ioSocket.data.uuid === message.receiver) {
-                    receiver = ioSocket;
-                    return;
-                }
-            })
+            let receiver = findSocket(message.receiver);
 
             if (receiver) {
                 receiver.emit("userTyping", {
@@ -538,7 +599,45 @@ export function run(serverPort, ioPort, dbConnectUri) {
                 });
             }
         });
+
+        socket.on("changeStatus", (request) => {
+            if (!(request.status in ["online", "do not disturb", "hidden"])) {
+                socket.emit("error", {
+                    opcode: 7,
+                    message: "There's only three types of status: online, do not disturb and hidden"
+                });
+            } else if (socket.data.user.status === request.status) {
+                return;
+            }
+
+            databaseService.updateUserStatus(socket.data.user.uuid, request.status);
+            socket.data.user.status = request.status
+
+            if (request.status === "hidden") {
+                io.in(socket.data.uuid).emit("status", { status: "offline" });
+                return;
+            }
+
+            io.in(socket.data.user.uuid).emit("status", request.status);
+        })
     })
 
     io.listen(ioPort)
+    
+    /**
+     * 
+     * @param {import("crypto").UUID} uuid 
+     * @returns {Socket}
+     */
+    async function findSocket(uuid) {
+        let socket = undefined;
+
+        (await io.fetchSockets()).filter(ioSocket => {
+            if (ioSocket.data.uuid === uuid) {
+                socket = ioSocket
+            }
+        });
+
+        return socket;
+    }
 }

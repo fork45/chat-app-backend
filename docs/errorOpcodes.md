@@ -13,3 +13,5 @@
 | 10   | This message has already been read | 400
 | 11   | Typing can go for at least 1 second and no more than 10 seconds | 400
 | 12   | Limit should be more than 1 and less than 100 | 400
+| 13   | You already have conversation with this user | 400
+| 14   | You don't have conversation with this user | 404
