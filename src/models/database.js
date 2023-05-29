@@ -36,7 +36,8 @@ export class DatabaseService {
             password: passwordHash,
             token: tokenHash,
             status: "online",
-            conversationsWith: []
+            conversationsWith: [],
+            lastExitTime: null
         });
 
         let userObject = new User({
@@ -45,10 +46,42 @@ export class DatabaseService {
             nickname: nickname,
             token: token,
             status: "online",
-            conversationsWith: []
+            conversationsWith: [],
+            lastExitTime: null
         })
 
         return userObject;
+    }
+
+    /**
+     * @param {UUID} user
+     */
+    async changeLastExitTime(user) {
+        await this.users.updateOne({
+            _id: user
+        }, {
+            lastExitTime: Math.floor(new Date().getTime() / 1000)
+        });
+    }
+
+    /**
+     * @param {UUID} user
+     */
+    async getUserMessagesAfterExitTime(user) {
+        let account = this.getUserWithUUID(user);
+        
+        let messages = this.messages.find({
+            type: "message",
+            datetime: {$gte: account.lastExitTime.getSeconds()},
+            $and: [
+                { $or: [{ author: user }, { author: from }] },
+                { $or: [{ receiver: user }, { receiver: from }] }
+            ]
+        }, {
+            sort: [{ datetime: -1 }]
+        });
+
+        return messages ? await messages.toArray() : [];
     }
 
     /**
@@ -113,10 +146,10 @@ export class DatabaseService {
             ]
         }, {
             limit: limit,
-            sort: [{ datetime: -1 }]
+            sort: [{datetime: -1}]
         });
 
-        return messages ? messages.toArray() : [];
+        return messages ? await messages.toArray() : [];
     }
 
     /**
@@ -275,6 +308,30 @@ export class DatabaseService {
         })
 
         return count >= 1 ? true : false;
+    }
+
+    /**
+     * @param {string} user
+     * @param {string} secondUser
+     * @returns {boolean | null}
+     */
+    async conversationReady(user, secondUser) {
+        /**
+         * Maybe you don't get what i want to do
+         * when user X is trying to create conversation with user Y
+         * To user X in the `conversationsWith` is added user Y
+         * When user Y gives his RSA key, then user X is added to user Y `conversationsWith` and conversation is ready
+         * 
+         * To understand if user Y has given a key, I need to check if user Y `conversationsWith` has user X
+         */
+
+        if (!this.hasConversationWith(secondUser, user)) {
+            return null;
+        } else if (this.hasConversationWith(user, secondUser)) {
+            return true;
+        }
+
+        return false;
     }
 
     /**

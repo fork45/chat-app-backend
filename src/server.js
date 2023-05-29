@@ -31,7 +31,7 @@ export function run(serverPort, ioPort, dbConnectUri) {
         let user = databaseService.getUserWithUUID(request.body.user);
         if (author === undefined || user === undefined) {
             response.status(400).send({
-                opcode: 404,
+                opcode: 2,
                 message: "User not found"
             });
             return;
@@ -126,9 +126,36 @@ export function run(serverPort, ioPort, dbConnectUri) {
 
             return;
         }
+        
+        if (!request.body.user) {
+            await response.status(404).send({
+                opcode: 2,
+                message: "User not found"
+            });
+
+            return;
+        } else if (!request.body.key) {
+            await response.status(400).send({
+                opcode: 16,
+                message: "Invalid RSA Key"
+            });
+
+            return;
+        }
+
+        try {
+            crypto.publicDecrypt(request.body.key, Buffer.from("TestRsaCryptoMessagePublicKeyDescryptVerification1234567890"));
+        } catch (error) {
+            response.status(400).send({
+                opcode: 16,
+                message: "Invalid RSA Key"
+            })
+
+            return;
+        }
 
         let user = databaseService.getUserWithUUID(request.body.user);
-        
+
         if (!user) {
             await response.status(404).send({
                 opcode: 2,
@@ -138,15 +165,15 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         } else if (databaseService.hasConversationWith(user.uuid, author.uuid)) {
             await response.status(400).send({
-                opcode: 13,
+                opcode: 14,
                 message: "You already have conversation with this user"
-            })
+            });
 
             return;
         }
 
         await databaseService.addConversationToUser(author, user);
-        await databaseService.addConversationToUser(user, author);
+        await databaseService.sendKey(author, user);
 
         let socket = findSocket(user.uuid);
 
@@ -191,7 +218,7 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         } else if (!databaseService.hasConversationWith(user.uuid, author.uuid)) {
             await response.status(404).send({
-                opcode: 14,
+                opcode: 15,
                 message: "You don't have conversation with this user"
             })
 
@@ -228,8 +255,8 @@ export function run(serverPort, ioPort, dbConnectUri) {
             crypto.publicDecrypt(request.body.key, Buffer.from("TestRsaCryptoMessagePublicKeyDescryptVerification1234567890"));
         } catch (error) {
             response.status(400).send({
-                opcode: 8,
-                message: "This is not RSA public key"
+                opcode: 16,
+                message: "Invalid RSA Key"
             })
             
             return;
@@ -243,6 +270,7 @@ export function run(serverPort, ioPort, dbConnectUri) {
                 opcode: 2,
                 message: "Receiver not found"
             });
+
             return;
         }
 
@@ -256,18 +284,37 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
-        databaseService.sendKey(user.uuid, receiver.uuid, request.body.key);
+        let ready = databaseService.conversationReady(user.uuid, receiver.uuid)
+
+        if (ready === null) {
+            await response.status(400).send({
+                opcode: 17,
+                message: "User didn't created conversation with you"
+            });
+
+            return;
+        } else if (ready === true) {
+            await response.status(400).send({
+                opcode: 18,
+                message: "You already sent RSA key"
+            });
+
+            return;
+        }
+
+        await databaseService.addConversationToUser(user.uuid, receiver.uuid);
+        await databaseService.sendKey(user, key);
 
         let socket = findSocket(receiverUuid);
 
         if (socket) {
-            socket.emit("key", {
+            socket.emit("conversationKey", {
                 key: request.body.key,
                 user: user.uuid
-            })            
+            });
         }
 
-        response.status(204).send()
+        response.status(204).send();
     })
 
     httpServer.get("/messages", async (request, response) => {
@@ -286,7 +333,7 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         } else if (request.body.limit < 1 && request.body.limit > 100) {
             response.status(400).send({
-                opcode: 12,
+                opcode: 13,
                 message: "Limit should be more than 1 and less than 100"
             });
 
@@ -521,8 +568,8 @@ export function run(serverPort, ioPort, dbConnectUri) {
             });
         });
 
-        // let messages = databaseService.getUserStandingMessages(socket.data.user.uuid);
-        // socket.emit("standing", messages);
+        let messages = await databaseService.getUserMessagesAfterExitTime(socket.data.user.uuid);
+        socket.emit("newMessages", messages);
 
         if (!(socket.data.user.status in ["hidden", "do not disturb"])) {
             io.in(socket.data.user.uuid).emit("status", { "status": "online" });
@@ -532,6 +579,8 @@ export function run(serverPort, ioPort, dbConnectUri) {
 
         socket.on("disconnect", (reason) => {
             io.in(socket.data.user.uuid).emit("status", { "status": "offline" });
+            
+            databaseService.changeLastExitTime(socket.data.uuid);
         })
 
         socket.on("markReadMessage", async (request) => {
@@ -548,14 +597,14 @@ export function run(serverPort, ioPort, dbConnectUri) {
 
             if (message.read) {
                 socket.emit("error", {
-                    opcode: 10,
+                    opcode: 11,
                     message: "This message has already been read"
                 });
 
                 return;
             } else if (message.receiver !== socket.data.user.uuid) {
                 socket.emit("error", {
-                    opcode: 9,
+                    opcode: 10,
                     message: "You can't mark this message as read because you're not an receiver"
                 });
 
@@ -583,7 +632,7 @@ export function run(serverPort, ioPort, dbConnectUri) {
                 return;
             } else if (request.seconds < 1 && request.seconds > 10) {
                 socket.emit("error", {
-                    opcode: 11,
+                    opcode: 12,
                     message: "Typing can go for at least 1 second and no more than 10 seconds"
                 });
 

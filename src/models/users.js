@@ -25,6 +25,8 @@ export class User {
         this.nickname = data.nickname
         this.token = data.token
         this.status = statuses[data.status]
+        this.conversationsWith = data.conversationsWith
+        this.lastExitTime = data.lastExitTime ? new Date(data.lastExitTime * 1000) : null;
 
         this.socket = socket
     }
