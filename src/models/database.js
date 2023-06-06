@@ -37,7 +37,8 @@ export class DatabaseService {
             token: tokenHash,
             status: "online",
             conversationsWith: [],
-            lastExitTime: null
+            lastExitTime: null,
+            avatar: null
         });
 
         let userObject = new User({
@@ -47,7 +48,8 @@ export class DatabaseService {
             token: token,
             status: "online",
             conversationsWith: [],
-            lastExitTime: null
+            lastExitTime: null,
+            avatar: null,
         })
 
         return userObject;
@@ -128,6 +130,14 @@ export class DatabaseService {
             _id: user
         }, {
             status: status
+        });
+    }
+
+    async setUserAvatar(user, avatar) {
+        await this.users.updateOne({
+            _id: user
+        }, {
+            avatar: avatar
         });
     }
 

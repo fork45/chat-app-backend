@@ -1,8 +1,7 @@
-import express from "express";
+import express, { response } from "express";
 import { Server, Socket } from "socket.io";
 import { DatabaseService } from "./models/database";
-import fs from "fs";
-import path from "path";
+import { StorageService } from "./models/storage";
 import { generateId } from "./models/messages";
 import crypto from "crypto";
 
@@ -10,26 +9,21 @@ export function run(serverPort, ioPort, dbConnectUri) {
     const httpServer = express()
     const io = new Server()
     const databaseService = new DatabaseService(dbConnectUri);
+    // TODO: Type configuration
+    const storage = new StorageService({});
 
     httpServer.post("/avatars", async (request, response) => {
-        let user = databaseService.getUserWithToken(request.header("authorization"));
-        if (user === undefined) {
-            response.status(400).send({
-                opcode: 404,
-                message: "User not found"
+        if (!request.header("authorization")) {
+            response.status(401).send({
+                opcode: 0,
+                message: "No token in request header"
             });
+
             return;
         }
-        const file = `../public/${user.uuid}.jpg`
-        response.download(file);
 
-        response.status(204).send();
-    })
-
-    httpServer.get("/avatars", async (request, response) => {
-        let author = databaseService.getUserWithToken(request.header("authorization"));
-        let user = databaseService.getUserWithUUID(request.body.user);
-        if (author === undefined || user === undefined) {
+        let user = databaseService.getUserWithToken(request.header("authorization"));
+        if (user === undefined) {
             response.status(400).send({
                 opcode: 2,
                 message: "User not found"
@@ -37,16 +31,43 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
-        let filePath = path.join("../public/", user.uuid);
-        let stat = fs.statSync(filePath);
+        const avatarFile = request.file;
+
+        // File can't be larger than 10 megabytes
+        if (avatarFile.size > 10000000) {
+            response.status(400).send({
+                opcode: 19,
+                message: "Avatar file can't be larger than 10 megabytes"
+            });
+
+            return;
+        }
+
+        let [avatar, hash] = await storage.saveAvatar(avatarFile);
+        await databaseService.setUserAvatar(user.uuid, hash);
+
+        response.status(204).send();
+    })
+
+    httpServer.get("/files/avatars/:file", (request, response) => {
+        let fileName = request.params.file;
+
+        let file = storage.getAvatar(fileName);
+
+        if (!file) {
+            response.status(404).send({
+                opcode: 20,
+                message: "Avatar not found"
+            });
+
+            return;
+        }
 
         response.writeHead(200, {
             "Content-Type": "image/jpeg",
-            "Content-Length": stat.size()
-        })
-
-        let readStream = fs.createReadStream(filePath);
-        readStream.pipe(response);
+            "Content-Length": file.length
+        });
+        response.end(file);
     })
 
     httpServer.post("/accounts", async (request, response) => {
@@ -78,6 +99,50 @@ export function run(serverPort, ioPort, dbConnectUri) {
             nickname: user.nickname,
             token: user.token
         });
+    })
+
+    httpServer.get("/conversation", async (request, response) => {
+        if (!request.header("authorization")) {
+            response.status(401).send({
+                opcode: 0,
+                message: "No token in request header"
+            });
+
+            return;
+        }
+
+        let author = databaseService.getUserWithToken(request.headers.authorization);
+
+        if (!author) {
+            await response.status(401).send({
+                opcode: 1,
+                message: "Invalid Token"
+            });
+
+            return;
+        } else if (!databaseService.hasConversationWith(request.body.data.user)) {
+            response.status(400).send({
+                opcode: 17,
+                message: "User didn't created conversation with you"
+            });
+
+            return;
+        }
+
+        let user = databaseService.getUserWithUUID(request.body.data.user);
+
+        if (!user) {
+            response.status(404).send({
+                opcode: 2,
+                message: "User not found"
+            });
+
+            return;
+        }
+
+        let data = user.generateSecureJson();
+
+        response.send(data);
     })
 
     httpServer.get("/conversations", async (request, response) => {
@@ -172,15 +237,21 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
-        await databaseService.addConversationToUser(author, user);
-        await databaseService.sendKey(author, user);
+        await databaseService.addConversationToUser(author.uuid, user.uuid);
+        await databaseService.sendKey(author.uuid, user.uuid);
 
         let socket = findSocket(user.uuid);
+        let authorSocket = findSocket(author)
 
         if (socket) {
             socket.emit("newConversation", {
                 user: author.uuid
             });
+        }
+        
+        if (authorSocket) {
+            let status = socket ? (socket.data.status === "hidden" ? "offline" : socket.data.status) : "offline"
+            authorSocket.emit("status", {status: status});
         }
 
         response.status(204).send();
@@ -562,20 +633,26 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
+        let messages = await databaseService.getUserMessagesAfterExitTime(socket.data.user.uuid);
+        socket.emit("newMessages", messages);
+
+        let friends = (await io.in(socket.data.user.uuid).fetchSockets());
+
+        friends.forEach(friend => {
+            let friendStatus = friendSocket ? (friendSocket.data.status === "hidden" ? "offline" : friendSocket.data.status) : null;
+
+            if (friendSocket) socket.emit("friendStatus", {status: friendStatus});
+        });
+
+        let status = socket.data.user.status === "hidden" ? "offline" : socket.data.user.status;
+
+        io.in(socket.data.user.uuid).emit("status", {"status": status});
+
         databaseService.getUserConversationsWith(socket.data.user.uuid).then(users => {
             users.array.forEach(user => {
                 socket.join(user);
             });
         });
-
-        let messages = await databaseService.getUserMessagesAfterExitTime(socket.data.user.uuid);
-        socket.emit("newMessages", messages);
-
-        if (!(socket.data.user.status in ["hidden", "do not disturb"])) {
-            io.in(socket.data.user.uuid).emit("status", { "status": "online" });
-        } else if (socket.data.user.status === "do not disturb") {
-            io.in(socket.data.user.uuid).emit("status", { "status": "do not disturb" });
-        }
 
         socket.on("disconnect", (reason) => {
             io.in(socket.data.user.uuid).emit("status", { "status": "offline" });
@@ -662,12 +739,15 @@ export function run(serverPort, ioPort, dbConnectUri) {
             databaseService.updateUserStatus(socket.data.user.uuid, request.status);
             socket.data.user.status = request.status
 
-            if (request.status === "hidden") {
-                io.in(socket.data.uuid).emit("status", { status: "offline" });
-                return;
-            }
+            let friends = databaseService.getUserConversationsWith(socket.data.user.uuid);
 
-            io.in(socket.data.user.uuid).emit("status", request.status);
+            let status = request.status === "hidden" ? "offline" : request.status;
+
+            friends.forEach(friend => {
+                let friendSocket = findSocket(friend);
+
+                if (friendSocket) friendSocket.emit("status", {status: status});
+            });
         })
     })
 
@@ -679,14 +759,12 @@ export function run(serverPort, ioPort, dbConnectUri) {
      * @returns {Socket}
      */
     async function findSocket(uuid) {
-        let socket = undefined;
-
-        (await io.fetchSockets()).filter(ioSocket => {
+        const socket = (await io.fetchSockets()).filter(ioSocket => {
             if (ioSocket.data.uuid === uuid) {
-                socket = ioSocket
+                return ioSocket
             }
         });
 
-        return socket;
+        return socket ? socket[0] : null;
     }
 }

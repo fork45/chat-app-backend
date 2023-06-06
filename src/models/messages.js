@@ -1,4 +1,4 @@
-function generateId() {
+export function generateId() {
     const chars = '1234567890';
     const rand = (min = 0, max = 1000) => Math.floor(Math.random() * (max - min) + min);
     const randchars = [];

@@ -30,6 +30,19 @@ export class User {
 
         this.socket = socket
     }
+
+    generateSecureJson() {
+        let data = this.data;
+        
+        // WTF is this :skull:
+        delete data.token
+        delete data.status
+        delete data.conversationsWith
+        delete data.lastExitTime
+        delete data.password
+
+        return data;
+    }
 }
 
 export const statuses = {
