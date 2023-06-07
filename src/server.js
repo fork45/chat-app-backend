@@ -1,4 +1,4 @@
-import express, { response } from "express";
+import express from "express";
 import { Server, Socket } from "socket.io";
 import { DatabaseService } from "./models/database";
 import { StorageService } from "./models/storage";
