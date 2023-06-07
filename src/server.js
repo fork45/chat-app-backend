@@ -12,6 +12,8 @@ export function run(serverPort, ioPort, dbConnectUri) {
     // TODO: Type configuration
     const storage = new StorageService({});
 
+    httpServer.use(express.json());
+
     httpServer.post("/avatars", async (request, response) => {
         if (!request.header("authorization")) {
             response.status(401).send({
@@ -29,6 +31,13 @@ export function run(serverPort, ioPort, dbConnectUri) {
                 message: "User not found"
             });
             return;
+        }
+
+        if (request.file.mimetype!== "image/png" && request.file.mimetype!== "image/jpeg") {
+            response.status(400).send({
+                opcode: 21,
+                message: "Avatar can be only jpeg or png"
+            });
         }
 
         const avatarFile = request.file;
@@ -76,12 +85,15 @@ export function run(serverPort, ioPort, dbConnectUri) {
                 opcode: 4,
                 message: "Your nickname or name must be no longer than 255 letters and no less than 4 letters"
             });
+            
             return;
         } else if (request.body.password.length < 8) {
             response.status(400).send({
                 opcode: 5,
                 message: "Password length should be long than 8 characters"
             });
+
+            return;
         }
 
         let user = databaseService.addUser(request.body.nickname, request.body.name, request.body.password);

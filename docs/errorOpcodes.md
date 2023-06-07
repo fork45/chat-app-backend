@@ -21,3 +21,4 @@
 | 18   | You already sent RSA key  | 400
 | 19   | Avatar file can't be larger than 10 megabytes | 400
 | 20   | Avatar not found | 404
+| 21   | Avatar can be only jpeg or png | 400

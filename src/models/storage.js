@@ -1,4 +1,5 @@
 import aws from "@aws-sdk/client-s3";
+import multer from "multer";
 
 export class StorageService {
 

@@ -5,8 +5,9 @@ import { Message } from "./messages"
 
 export class DatabaseService {
 
-    constructor(host, user, password) {
-        this.client = new MongoClient()
+    constructor(uri) {
+        this.uri = uri;
+        this.client = new MongoClient(uri);
 
         this.database = this.client.db("main");
         this.users = this.database.collection("users");
@@ -26,8 +27,6 @@ export class DatabaseService {
         let passwordHash = createHash("sha256").update(password).digest("hex").toString();
 
         if (!(this.checkName(name))) return false;
-        
-        let data = [uuid, tokenHash, passwordHash, name, nickname, 0]
 
         await this.users.insertOne({
             _id: uuid,
