@@ -645,6 +645,9 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
+        let waitingUsers = await databaseService.findWaitingUsers(socket.data.user.uuid);
+        socket.emit("waitingUsers", waitingUsers);
+
         let messages = await databaseService.getUserMessagesAfterExitTime(socket.data.user.uuid);
         socket.emit("newMessages", messages);
 
@@ -712,6 +715,8 @@ export function run(serverPort, ioPort, dbConnectUri) {
         });
 
         socket.on("typing", async (request) => {
+            request = JSON.parse(request);
+
             let user = databaseService.getUserWithUUID(request.user);
             if (!user) {
                 socket.emit("error", {
@@ -739,6 +744,8 @@ export function run(serverPort, ioPort, dbConnectUri) {
         });
 
         socket.on("changeStatus", (request) => {
+            request = JSON.parse(request);
+            
             if (!(request.status in ["online", "do not disturb", "hidden"])) {
                 socket.emit("error", {
                     opcode: 7,

@@ -343,9 +343,24 @@ export class DatabaseService {
         return false;
     }
 
+    async findWaitingUsers(user) {
+        let conversations = await this.getUserConversationsWith(user);
+
+        // Find users that have user in their list
+
+
+        let users = await this.users.find({
+            conversationsWith: { $in: user }
+        });
+
+        return users.filter(user => !conversations.includes(user));
+    }
+
     /**
+     * 
      * @param {string} user
-     */
+     * @returns {Object[]} 
+    */
     async getUserConversationsWith(user) {
         let account = await this.users.findOne({
             _id: user,
