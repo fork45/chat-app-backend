@@ -14,10 +14,9 @@ export function generateToken() {
 export class User {
     /**
      * 
-     * @param {} data
-     * @param {Socket} socket1
+     * @param {Object} data
      */
-    constructor(data, socket = null) {
+    constructor(data) {
         this.data = data
 
         this.uuid = data._id
@@ -27,8 +26,6 @@ export class User {
         this.status = statuses[data.status]
         this.conversationsWith = data.conversationsWith
         this.lastExitTime = data.lastExitTime ? new Date(data.lastExitTime * 1000) : null;
-
-        this.socket = socket
     }
 
     generateSecureJson() {

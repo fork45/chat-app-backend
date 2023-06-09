@@ -161,6 +161,31 @@ export class DatabaseService {
         return messages ? await messages.toArray() : [];
     }
 
+    async getUserMessagesAfterMessage(user, from, messageId, limit) {
+        let message = await this.messages.findOne({
+            _id: messageId
+        });
+
+        if (!message) {
+            return false;
+        }
+        
+        // (author == user or author == from) and (receiver == user or receiver == from)
+        let messages = this.messages.find({
+            type: "message",
+            $and: [
+                { $or: [{ author: user }, { author: from }] },
+                { $or: [{ receiver: user }, { receiver: from }] }
+            ],
+            datetime: { $gt: message.datetime }
+        }, {
+            limit: limit,
+            sort: [{datetime: -1}]
+        });
+
+        return messages ? await messages.toArray() : [];
+    }
+
     /**
      * @param {string} id
      * @param {UUID} author
