@@ -84,6 +84,30 @@ export function run(serverPort, ioPort, dbConnectUri) {
         response.end(file);
     });
 
+    httpServer.get("/@me", async (request, response) => {
+        if (!request.header("authorization")) {
+            response.status(401).send({
+                opcode: 0,
+                message: "No token in request header"
+            });
+
+            return;
+        }
+
+        let author = databaseService.getUserWithToken(request.headers.authorization);
+
+        if (!author) {
+            await response.status(401).send({
+                opcode: 1,
+                message: "Invalid Token"
+            });
+
+            return;
+        }
+
+        response.status(200).send(author.generateSecureJson());
+    });
+
     httpServer.post("/accounts", async (request, response) => {
         if ((request.body.nickname.length > 255 || request.body.nickname.length <= 3) || (request.body.name.length > 255 || request.body.name.length <= 3)) {
             response.status(400).send({
@@ -672,12 +696,18 @@ export function run(serverPort, ioPort, dbConnectUri) {
         friends.forEach(friend => {
             let friendStatus = friend ? (friend.data.status === "hidden" ? "offline" : friend.data.status) : null;
 
-            if (friend) socket.emit("friendStatus", {status: friendStatus});
+            if (friend) socket.emit("friendStatus", {
+                user: friend.data.user.uuid,
+                status: friendStatus
+            });
         });
 
         let status = socket.data.user.status === "hidden" ? "offline" : socket.data.user.status;
 
-        io.in(socket.data.user.uuid).emit("status", {"status": status});
+        io.in(socket.data.user.uuid).emit("status", {
+            user: socket.data.user.uuid,
+            status: status
+        });
 
         databaseService.getUserConversationsWith(socket.data.user.uuid).then(users => {
             users.array.forEach(user => {
@@ -787,7 +817,10 @@ export function run(serverPort, ioPort, dbConnectUri) {
 
             let status = request.status === "hidden" ? "offline" : request.status;
 
-            io.in(socket.data.uuid).emit("status", status);
+            io.in(socket.data.uuid).emit("status", {
+                user: socket.data.user.uuid,
+                status: status
+            });
         });
     });
 

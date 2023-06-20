@@ -49,7 +49,7 @@ export class DatabaseService {
             conversationsWith: [],
             lastExitTime: null,
             avatar: null,
-        })
+        });
 
         return userObject;
     }
