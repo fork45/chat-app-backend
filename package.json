@@ -8,7 +8,7 @@
     "start": "node src/app.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "fr45",
+  "author": "fork45",
   "license": "MIT",
   "dependencies": {
     "dotenv": "^16.0.3",
