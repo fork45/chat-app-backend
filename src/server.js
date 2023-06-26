@@ -1,92 +1,19 @@
 import express from "express";
 import { Server, Socket } from "socket.io";
-import { DatabaseService } from "./models/database";
-import { StorageService } from "./models/storage";
-import { generateId } from "./models/messages";
+import { DatabaseService } from "./models/database.js";
+import { generateId } from "./models/messages.js";
 import crypto from "crypto";
 
-export function run(serverPort, ioPort, dbConnectUri) {
+export default function run(serverPort, ioPort, dbConnectUri) {
     const httpServer = express()
     const io = new Server()
     const databaseService = new DatabaseService(dbConnectUri);
-    // TODO: Type configuration
-    const storage = new StorageService({});
 
     httpServer.use(express.json());
 
-    httpServer.post("/avatars", async (request, response) => {
-        if (!request.header("authorization")) {
-            response.status(401).send({
-                opcode: 0,
-                message: "No token in request header"
-            });
-
-            return;
-        }
-
-        let user = databaseService.getUserWithToken(request.header("authorization"));
-        if (user === undefined) {
-            response.status(401).send({
-                opcode: 1,
-                message: "Invalid token"
-            });
-            return;
-        }
-
-        if (request.file.mimetype !== "image/png" && request.file.mimetype !== "image/jpeg") {
-            response.status(400).send({
-                opcode: 22,
-                message: "Avatar can be only jpeg or png"
-            });
-        }
-
-        const avatarFile = request.file;
-
-        // File can't be larger than 10 megabytes
-        if (avatarFile.size > 10000000) {
-            response.status(400).send({
-                opcode: 29,
-                message: "Avatar file can't be larger than 10 megabytes"
-            });
-
-            return;
-        } else if (avatarFile.size === 0) {
-            response.status(400).send({
-                opcode: 23,
-                message: "You can't send empty file to server"
-            });
-        }
-
-        let [avatar, hash] = await storage.saveAvatar(avatarFile);
-        await databaseService.setUserAvatar(user.uuid, hash);
-
-        response.status(204).send();
-    });
-
-    httpServer.get("/files/avatars/:file", (request, response) => {
-        let fileName = request.params.file;
-
-        let file = storage.getAvatar(fileName);
-
-        if (!file) {
-            response.status(404).send({
-                opcode: 21,
-                message: "Avatar not found"
-            });
-
-            return;
-        }
-
-        response.writeHead(200, {
-            "Content-Type": "image/jpeg",
-            "Content-Length": file.length
-        });
-        response.end(file);
-    });
-
     httpServer.get("/@me", async (request, response) => {
         if (!request.header("authorization")) {
-            response.status(401).send({
+            response.status(401).json({
                 opcode: 0,
                 message: "No token in request header"
             });
@@ -94,10 +21,10 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
-        let author = databaseService.getUserWithToken(request.headers.authorization);
+        let author = await databaseService.getUserWithToken(request.headers.authorization);
 
         if (!author) {
-            await response.status(401).send({
+            await response.status(401).json({
                 opcode: 1,
                 message: "Invalid Token"
             });
@@ -105,19 +32,19 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
-        response.status(200).send(author.generateSecureJson());
+        response.json(author.generateSecureJson());
     });
 
     httpServer.post("/accounts", async (request, response) => {
         if ((request.body.nickname.length > 255 || request.body.nickname.length <= 3) || (request.body.name.length > 255 || request.body.name.length <= 3)) {
-            response.status(400).send({
+            response.status(400).json({
                 opcode: 4,
                 message: "Your nickname or name must be no longer than 255 letters and no less than 4 letters"
             });
             
             return;
         } else if (request.body.password.length < 8) {
-            response.status(400).send({
+            response.status(400).json({
                 opcode: 5,
                 message: "Password length should be long than 8 characters"
             });
@@ -125,9 +52,10 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
-        let user = databaseService.addUser(request.body.nickname, request.body.name, request.body.password);
+        let user = await databaseService.addUser(request.body.nickname, request.body.name, request.body.password);
+        
         if (user === false) {
-            response.status(400).send({
+            response.status(400).json({
                 opcode: 6,
                 message: "Your name does not match this regex: ^[a-zA-Z0-9_-]+$"
             });
@@ -135,17 +63,54 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
-        response.status(200).send({
-            uuid: user.uuid,
+        response.json({
+            _id: user.uuid,
             name: user.name,
             nickname: user.nickname,
             token: user.token
         });
     });
 
-    httpServer.get("/conversation", async (request, response) => {
+    httpServer.get("/login", async (request, response) => {
+        const name = request.body.name
+        const password = request.body.password
+
+        let [token, user] = await databaseService.login(name, password);
+
+        if (user === "no user") {
+            response.status(400).json({
+                opcode: 2,
+                message: "User not found"
+            });
+
+            return;
+        } else if (user === "incorrect password") {
+            response.status(400).json({
+                opcode: 20,
+                message: "Incorrect password"
+            });
+
+            return;
+        }
+
+        let data = user.generateSecureJson();
+        data.token = token
+
+        response.json(data);
+    });
+
+    httpServer.get("/conversations/:user", async (request, response) => {
+        if (!request.params.user) {
+            response.status(404).json({
+                opcode: 2,
+                message: "User not found"
+            });
+
+            return;
+        }
+        
         if (!request.header("authorization")) {
-            response.status(401).send({
+            response.status(401).json({
                 opcode: 0,
                 message: "No token in request header"
             });
@@ -153,17 +118,17 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
-        let author = databaseService.getUserWithToken(request.headers.authorization);
+        let author = await databaseService.getUserWithToken(request.headers.authorization);
 
         if (!author) {
-            await response.status(401).send({
+            response.status(401).json({
                 opcode: 1,
                 message: "Invalid Token"
             });
 
             return;
-        } else if (!databaseService.hasConversationWith(request.body.data.user)) {
-            response.status(400).send({
+        } else if (!(await databaseService.hasConversationWith(request.params.user, author.uuid))) {
+            response.status(400).json({
                 opcode: 18,
                 message: "User didn't created conversation with you"
             });
@@ -171,10 +136,10 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
-        let user = databaseService.getUserWithUUID(request.body.data.user);
+        let user = await databaseService.getUserWithUUID(request.params.user);
 
         if (!user) {
-            response.status(404).send({
+            response.status(404).json({
                 opcode: 2,
                 message: "User not found"
             });
@@ -184,12 +149,12 @@ export function run(serverPort, ioPort, dbConnectUri) {
 
         let data = user.generateSecureJson();
 
-        response.status(200).send(data);
+        response.status(200).json(data);
     });
 
     httpServer.get("/conversations", async (request, response) => {
         if (!request.header("authorization")) {
-            response.status(401).send({
+            response.status(401).json({
                 opcode: 0,
                 message: "No token in request header"
             });
@@ -197,10 +162,10 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
-        let user = databaseService.getUserWithToken(request.headers.authorization);
+        let user = await databaseService.getUserWithToken(request.headers.authorization);
 
         if (!user) {
-            await response.status(401).send({
+            response.status(401).json({
                 opcode: 1,
                 message: "Invalid Token"
             });
@@ -210,12 +175,12 @@ export function run(serverPort, ioPort, dbConnectUri) {
 
         let users = await databaseService.getUserConversationsWith(user.uuid);
 
-        response.status(200).send(users);
+        response.status(200).json(users);
     });
 
     httpServer.post("/conversations", async (request, response) => {
         if (!request.header("authorization")) {
-            response.status(401).send({
+            response.status(401).json({
                 opcode: 0,
                 message: "No token in request header"
             });
@@ -223,10 +188,10 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
-        let author = databaseService.getUserWithToken(request.headers.authorization);
+        let author = await databaseService.getUserWithToken(request.headers.authorization);
 
         if (!author) {
-            await response.status(401).send({
+            response.status(401).json({
                 opcode: 1,
                 message: "Invalid Token"
             });
@@ -235,7 +200,7 @@ export function run(serverPort, ioPort, dbConnectUri) {
         }
         
         if (!request.body.key) {
-            await response.status(400).send({
+            response.status(400).json({
                 opcode: 17,
                 message: "Invalid RSA Key"
             });
@@ -244,9 +209,9 @@ export function run(serverPort, ioPort, dbConnectUri) {
         }
 
         try {
-            crypto.publicDecrypt(request.body.key, Buffer.from("TestRsaCryptoMessagePublicKeyDescryptVerification1234567890$%^&*()!@#/|-/|<>?.,;"));
+            crypto.publicEncrypt(request.body.key, Buffer.from("TestRsaCryptoMessagePublicKeyDescryptVerification1234567890$%^&*()!@#/|-/|<>?.,;"));
         } catch (error) {
-            response.status(400).send({
+            response.status(400).json({
                 opcode: 17,
                 message: "Invalid RSA Key"
             })
@@ -254,17 +219,17 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
-        let user = databaseService.getUserWithUUID(request.body.user);
+        let user = await databaseService.getUserWithName(request.body.user);
 
         if (!user) {
-            await response.status(404).send({
+            response.status(404).json({
                 opcode: 2,
                 message: "User not found"
             });
 
             return;
-        } else if (databaseService.hasConversationWith(user.uuid, author.uuid)) {
-            await response.status(400).send({
+        } else if (await databaseService.hasConversationWith(user.uuid, author.uuid)) {
+            response.status(400).json({
                 opcode: 15,
                 message: "You already have conversation with this user"
             });
@@ -273,28 +238,40 @@ export function run(serverPort, ioPort, dbConnectUri) {
         }
 
         await databaseService.addConversationToUser(author.uuid, user.uuid);
-        await databaseService.sendKey(author.uuid, user.uuid);
+        await databaseService.sendKey(author.uuid, user.uuid, request.body.key);
 
-        let socket = findSocket(user.uuid);
-        let authorSocket = findSocket(author)
-
-        if (socket) {
-            socket.emit("newConversation", {
-                user: author.uuid
+        findSocket(user.uuid)
+            .then(socket => {
+                if (socket) {
+                    socket.emit("newConversation", {
+                        user: author.uuid
+                    });
+                }
             });
-        }
-        
-        if (authorSocket) {
-            let status = socket ? (socket.data.status === "hidden" ? "offline" : socket.data.status) : "offline"
-            authorSocket.emit("status", {status: status});
-        }
+
+        let authorSocket = findSocket(author)
+            .then(socket => {
+                if (socket) {
+                    let status = socket ? (socket.data.status === "hidden" ? "offline" : socket.data.status) : "offline"
+                    authorSocket.emit("status", { status: status });
+                }
+            });
 
         response.status(204).send();
     });
 
-    httpServer.delete("/conversations", async (request, response) => {
+    httpServer.delete("/conversations/:user", async (request, response) => {
+        if (!request.params.user) {
+            response.status(404).json({
+                opcode: 2,
+                message: "User not found"
+            });
+
+            return;
+        }
+
         if (!request.header("authorization")) {
-            response.status(401).send({
+            response.status(401).json({
                 opcode: 0,
                 message: "No token in request header"
             });
@@ -302,10 +279,10 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
-        let author = databaseService.getUserWithToken(request.headers.authorization);
+        let author = await databaseService.getUserWithToken(request.headers.authorization);
 
         if (!author) {
-            await response.status(401).send({
+            await response.status(401).json({
                 opcode: 1,
                 message: "Invalid Token"
             });
@@ -313,17 +290,17 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
-        let user = databaseService.getUserWithUUID(request.body.user);
+        let user = await databaseService.getUserWithUUID(request.params.user);
 
         if (!user) {
-            await response.status(404).send({
+            response.status(404).json({
                 opcode: 2,
                 message: "User not found"
             });
 
             return;
-        } else if (!databaseService.hasConversationWith(user.uuid, author.uuid)) {
-            await response.status(404).send({
+        } else if (!(await databaseService.hasConversationWith(user.uuid, author.uuid))) {
+            response.status(404).json({
                 opcode: 16,
                 message: "You don't have conversation with this user"
             });
@@ -331,12 +308,12 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
-        await databaseService.removeConversationFromUser(author, user);
-        await databaseService.removeConversationFromUser(user, author);
+        await databaseService.removeConversationFromUser(author.uuid, user.uuid);
+        await databaseService.removeConversationFromUser(user.uuid, author.uuid);
 
-        await databaseService.deleteMessagesInConversation(author, user);
+        await databaseService.deleteMessagesInConversation(author.uuid, user.uuid);
 
-        let socket = findSocket(user.uuid);
+        let socket = await findSocket(user.uuid);
 
         if (socket) {
             socket.emit("conversationDelete", {
@@ -349,7 +326,7 @@ export function run(serverPort, ioPort, dbConnectUri) {
 
     httpServer.post("/key", async (request, response) => {
         if (!request.header("authorization")) {
-            response.status(401).send({
+            response.status(401).json({
                 opcode: 0,
                 message: "No token in request header"
             });
@@ -358,21 +335,22 @@ export function run(serverPort, ioPort, dbConnectUri) {
         }
 
         try {
-            crypto.publicDecrypt(request.body.key, Buffer.from("TestRsaCryptoMessagePublicKeyDescryptVerification1234567890"));
+            crypto.publicEncrypt(request.body.key, Buffer.from("TestRsaCryptoMessagePublicKeyDescryptVerification1234567890$%^&*()!@#/|-/|<>?.,;"));
         } catch (error) {
-            response.status(400).send({
+            response.status(400).json({
                 opcode: 17,
                 message: "Invalid RSA Key"
-            })
-            
+            });
+
+            console.log(error)
             return;
         }
 
-        let receiverUuid = request.body.receiver
-        let receiver = databaseService.getUserWithUUID(receiverUuid);
+        let userName = request.body.user
+        let user = await databaseService.getUserWithName(userName);
 
-        if (!receiver) {
-            response.status(404).send({
+        if (!user) {
+            response.status(404).json({
                 opcode: 2,
                 message: "Receiver not found"
             });
@@ -380,27 +358,28 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
-        let user = databaseService.getUserWithToken(request.headers.authorization);
+        let author = await databaseService.getUserWithToken(request.headers.authorization);
 
-        if (!user) {
-            response.status(401).send({
+        if (!author) {
+            response.status(401).json({
                 opcode: 1,
                 message: "Invalid Token"
             })
+
             return;
         }
 
-        let ready = databaseService.conversationReady(user.uuid, receiver.uuid)
+        let ready = await databaseService.conversationReady(author.uuid, user.uuid)
 
         if (ready === null) {
-            await response.status(400).send({
+            await response.status(400).json({
                 opcode: 18,
                 message: "User didn't created conversation with you"
             });
 
             return;
         } else if (ready === true) {
-            await response.status(400).send({
+            await response.status(400).json({
                 opcode: 19,
                 message: "You already sent RSA key"
             });
@@ -408,10 +387,10 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
-        await databaseService.addConversationToUser(user.uuid, receiver.uuid);
-        await databaseService.sendKey(user, key);
+        await databaseService.addConversationToUser(author.uuid, user.uuid);
+        await databaseService.sendKey(author.uuid, user.uuid, request.body.key);
 
-        let socket = findSocket(receiverUuid);
+        let socket = await findSocket(user.uuid);
 
         if (socket) {
             socket.emit("conversationKey", {
@@ -423,22 +402,29 @@ export function run(serverPort, ioPort, dbConnectUri) {
         response.status(204).send();
     });
 
-    httpServer.get("/messages", async (request, response) => {
-        request.body = JSON.parse(request.body);
+    httpServer.get("/messages/:user", async (request, response) => {
+        if (!request.params.user) {
+            response.status(404).json({
+                opcode: 2,
+                message: "User not found"
+            });
 
-        if (!request.body.limit) {
+            return;
+        }
+        
+        if (!request.query.limit) {
             request.body.limit = 50
         }
 
         if (!request.header("authorization")) {
-            response.status(401).send({
+            response.status(401).json({
                 opcode: 0,
                 message: "No token in request header"
             });
 
             return;
         } else if (request.body.limit < 1 || request.body.limit > 100) {
-            response.status(400).send({
+            response.status(400).json({
                 opcode: 14,
                 message: "Limit should be more than 1 and less than 100"
             });
@@ -446,21 +432,21 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
 
-        let user = databaseService.getUserWithToken(request.headers.authorization);
+        let user = await databaseService.getUserWithToken(request.headers.authorization);
 
         if (!user) {
-            await response.status(401).send({
+            response.status(401).json({
                 opcode: 1,
                 message: "Invalid Token"
-            })
+            });
 
             return;
         }
 
-        let interlocutor = databaseService.getUserWithUUID(request.body.user);
+        let interlocutor = await databaseService.getUserWithUUID(request.params.user);
 
         if (!interlocutor) {
-            response.status(404).send({
+            response.status(404).json({
                 opcode: 2,
                 message: "User not found"
             });
@@ -469,11 +455,11 @@ export function run(serverPort, ioPort, dbConnectUri) {
         }
         let messages = [];
 
-        if (request.body.after) {
-            messages = databaseService.getUserMessagesAfterMessage(user.uuid, interlocutor.uuid, request.body.after, request.body.limit);
+        if (request.query.after) {
+            messages = await databaseService.getUserMessagesAfterMessage(user.uuid, interlocutor.uuid, request.body.after, request.body.limit);
             
             if (messages === false) {
-                await response.status(404).send({
+                response.status(404).json({
                     opcode: 8,
                     message: "Message doesn't exists"
                 });
@@ -481,31 +467,31 @@ export function run(serverPort, ioPort, dbConnectUri) {
                 return;
             }
         } else {
-            messages = databaseService.getUserMessages(user.uuid, interlocutor.uuid, request.body.limit);
+            messages = await databaseService.getUserMessages(user.uuid, interlocutor.uuid, request.body.limit);
         }
 
-        response.status(200).send(messages);
+        response.status(200).json(messages);
     });
 
     httpServer.post("/messages", async (request, response) => {
         if (!request.header("authorization")) {
-            response.status(401).send({
+            response.status(401).json({
                 opcode: 0,
                 message: "No token in request header"
             });
             
             return;
-        } else if (request.body.content.length > 900 || request.body.content.length <= 0) {
-            response.status(400).send({
+        } else if (request.body.content.length > 1200 || request.body.content.length <= 0) {
+            response.status(400).json({
                 opcode: 3,
                 message: "Your message must be no longer than 900 letters and not less than 1 letter"
             })
         }
 
-        let user = databaseService.getUserWithToken(request.headers.authorization);
+        let author = await databaseService.getUserWithToken(request.headers.authorization);
 
-        if (!user) {
-            await response.status(401).send({
+        if (!author) {
+            await response.status(401).json({
                 opcode: 1,
                 message: "Invalid Token"
             })
@@ -513,10 +499,10 @@ export function run(serverPort, ioPort, dbConnectUri) {
         }
 
         let receiverUuid = request.body.receiver
-        let receiver = databaseService.getUserWithUUID(receiverUuid);
+        let receiver = await databaseService.getUserWithUUID(receiverUuid);
 
         if (!receiver) {
-            response.status(404).send({
+            response.status(404).json({
                 opcode: 2, 
                 message: "Receiver not found"
             });
@@ -525,26 +511,35 @@ export function run(serverPort, ioPort, dbConnectUri) {
 
         const id = generateId();
 
-        databaseService.addMessage(id, user.uuid, receiverUuid, request.body.content);
+        databaseService.addMessage(id, author.uuid, receiverUuid, request.body.content);
 
-        let socket = findSocket(receiverUuid);
+        let socket = await findSocket(receiverUuid);
 
         if (socket) {
             socket.emit("newMessage", {
                 _id: id,
-                user: user.uuid,
+                user: author.uuid,
                 content: request.body.content
             });
         }
 
-        response.status(200).send({
+        response.status(200).json({
             _id: id
-        })
+        });
     });
 
-    httpServer.delete("/messages", async (request, response) => {
+    httpServer.delete("/messages/:message", async (request, response) => {
+        if (!request.params.message) {
+            response.status(404).json({
+                opcode: 8,
+                message: "Message doesn't exists"
+            });
+
+            return;
+        }
+
         if (!request.header("authorization")) {
-            response.status(401).send({
+            response.status(401).json({
                 opcode: 0,
                 message: "No token in request header"
             });
@@ -552,45 +547,38 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
         
-        let user = databaseService.getUserWithToken(request.headers.authorization);
+        let user = await databaseService.getUserWithToken(request.headers.authorization);
 
         if (!user) {
-            response.status(401).send({
+            response.status(401).json({
                 opcode: 1,
                 message: "Invalid Token"
             })
             return;
         }
 
-        let message = databaseService.getMessage(request.body.id);
-        let receiver = databaseService.getUserWithUUID(message.receiver);
-
-        if (!receiver) {
-            response.status(404).send({
-                opcode: 2,
-                message: "Receiver not found"
-            });
-
-            return;
-        }
+        let message = await databaseService.getMessage(request.params.message);
+        let receiver = await databaseService.getUserWithUUID(message.receiver);
         
         if (!message) {
-            response.status(404).send({
+            response.status(404).json({
                 opcode: 8,
                 message: "Message doesn't exists"
             });
 
             return;
         } else if (message.author !== user.uuid) {
-            response.status(403).send({
+            response.status(403).json({
                 opocode: 11,
                 message: "You can't delete this message because you're not an author"
             });
+
+            return;
         }
 
-        databaseService.editMessage(request.body.id);
+        await databaseService.deleteMessage(request.params.message);
 
-        let socket = findSocket(receiver.uuid);
+        let socket = await findSocket(receiver.uuid);
 
         if (socket) {
             socket.emit("deleteMessage", {
@@ -604,48 +592,48 @@ export function run(serverPort, ioPort, dbConnectUri) {
 
     httpServer.patch("/messages", async (request, response) => {
         if (!request.header("authorization")) {
-            response.status(401).send({
+            response.status(401).json({
                 opcode: 0,
                 message: "No token in request header"
             });
 
             return;
-        } else if (request.body.content.length > 900 || request.body.content.length <= 0) {
-            response.status(400).send({
+        } else if (request.body.content.length > 1200 || request.body.content.length <= 0) {
+            response.status(400).json({
                 opcode: 3,
                 message: "Your message must be no longer than 900 letters and not less than 1 letter"
             })
         }
 
-        let user = databaseService.getUserWithToken(request.headers.authorization);
+        let user = await databaseService.getUserWithToken(request.headers.authorization);
 
         if (!user) {
-            response.status(401).send({
+            response.status(401).json({
                 opcode: 1,
                 message: "Invalid Token"
             })
             return;
         }
 
-        let message = databaseService.getMessage(request.body.id);
-        let receiver = databaseService.getUserWithUUID(message.receiver);
+        let message = await databaseService.getMessage(request.body.id);
+        let receiver = await databaseService.getUserWithUUID(message.receiver);
         
         if (!message) {
-            response.status(404).send({
+            response.status(404).json({
                 opcode: 8,
                 message: "Message doesn't exists"
             });
 
             return;
         } else if (!receiver) {
-            response.status(404).send({
+            response.status(404).json({
                 opcode: 2,
                 message: "Receiver not found"
             });
 
             return;
         } else if (message.author !== user.uuid) {
-            response.status(403).send({
+            response.status(403).json({
                 opcode: 9,
                 message: "You can't edit this message because you're not an author"
             });
@@ -653,9 +641,9 @@ export function run(serverPort, ioPort, dbConnectUri) {
             return;
         }
         
-        databaseService.editMessage(message._id, request.body.content);
+        await databaseService.editMessage(message._id, request.body.content);
 
-        let socket = findSocket(receiver.uuid);
+        let socket = await findSocket(receiver.uuid);
 
         if (socket) {
             socket.emit("editMessage", {
@@ -668,12 +656,12 @@ export function run(serverPort, ioPort, dbConnectUri) {
     });
 
     httpServer.listen(serverPort, () => {
-        console.log(`Example app is listening on port ${ioPort}`)
+        console.log(`HTTP is listening on port ${serverPort}\nSocket.io is listening on port ${ioPort}`)
     });
 
     io.on("connection", async (socket) => {
         socket.data.token = socket.handshake.auth["token"]
-        socket.data.user = await databaseService.getUserWithToken(token=socket.data.token)
+        socket.data.user = await databaseService.getUserWithToken(socket.data.token)
         
         if (socket.data.user === undefined) {
             socket.emit("error", {
@@ -709,21 +697,21 @@ export function run(serverPort, ioPort, dbConnectUri) {
             status: status
         });
 
-        databaseService.getUserConversationsWith(socket.data.user.uuid).then(users => {
-            users.array.forEach(user => {
-                socket.join(user);
-            });
+        let users = await databaseService.getUserConversationsWith(socket.data.user.uuid);
+        
+        users.forEach(user => {
+            socket.join(user);
         });
 
-        socket.on("disconnect", (reason) => {
+        socket.emit("ready");
+
+        socket.on("disconnect", async (reason) => {
             io.in(socket.data.user.uuid).emit("status", { "status": "offline" });
             
-            databaseService.changeLastExitTime(socket.data.uuid);
+            await databaseService.changeLastExitTime(socket.data.user.uuid);
         });
 
-        socket.on("markReadMessage", async (request) => {
-            request = JSON.parse(request);
-
+        socket.on("markMessageRead", async (request) => {
             if (!(await databaseService.messageExists(request.id))) {
                 socket.emit("error", {
                     opcode: 8,
@@ -753,33 +741,24 @@ export function run(serverPort, ioPort, dbConnectUri) {
 
             await databaseService.markMessageAsRead(message._id);
 
-            let receiver = findSocket(message.receiver);
+            let author = await findSocket(message.author);
             
-            if (receiver) {
-                receiver.emit("readMessage", {
+            if (author) {
+                author.emit("readMessage", {
                     _id: message._id
                 });
             }
         });
 
         socket.on("typing", async (request) => {
-            request = JSON.parse(request);
-
-            let user = databaseService.getUserWithUUID(request.user);
+            let user = await databaseService.getUserWithUUID(request.user);
             if (!user) {
                 socket.emit("error", {
                     opcode: 2,
                     message: "User not found"
                 });
                 return;
-            } else if (request.seconds < 1 || request.seconds > 10) {
-                socket.emit("error", {
-                    opcode: 13,
-                    message: "Typing can go for at least 1 second and no more than 10 seconds"
-                });
-
-                return;
-            } else if (!databaseService.hasConversationWith(request.user, socket.data.user.uuid)) {
+            } else if (!(await databaseService.hasConversationWith(request.user, socket.data.user.uuid))) {
                 socket.emit("error", {
                     opcode: 18,
                     message: "User didn't created conversation with you"
@@ -788,20 +767,17 @@ export function run(serverPort, ioPort, dbConnectUri) {
                 return;
             }
 
-            let receiver = findSocket(user.uuid);
+            let receiver = await findSocket(user.uuid);
 
             if (receiver) {
                 receiver.emit("userTyping", {
                     user: socket.data.user.uuid,
-                    seconds: request.seconds
                 });
             }
         });
 
-        socket.on("changeStatus", (request) => {
-            request = JSON.parse(request);
-            
-            if (!(request.status in ["online", "do not disturb", "hidden"])) {
+        socket.on("changeStatus", async (request) => {
+            if (!(["online", "do not disturb", "hidden"].includes(request.status))) {
                 socket.emit("error", {
                     opcode: 7,
                     message: "There's only three types of status: online, do not disturb and hidden"
@@ -812,12 +788,12 @@ export function run(serverPort, ioPort, dbConnectUri) {
                 return;
             }
 
-            databaseService.updateUserStatus(socket.data.user.uuid, request.status);
+            await databaseService.updateUserStatus(socket.data.user.uuid, request.status);
             socket.data.user.status = request.status
 
             let status = request.status === "hidden" ? "offline" : request.status;
 
-            io.in(socket.data.uuid).emit("status", {
+            io.in(socket.data.user.uuid).emit("status", {
                 user: socket.data.user.uuid,
                 status: status
             });
@@ -829,7 +805,7 @@ export function run(serverPort, ioPort, dbConnectUri) {
     /**
      * 
      * @param {import("crypto").UUID} uuid 
-     * @returns {Socket}
+     * @returns {Promise<Socket>}
      */
     async function findSocket(uuid) {
         const socket = (await io.fetchSockets()).filter(ioSocket => {

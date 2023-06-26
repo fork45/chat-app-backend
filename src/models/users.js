@@ -1,14 +1,11 @@
-import { Socket } from "socket.io";
+import crypto from "crypto";
 
-export function generateToken() {
-    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPRQSTUVWXYZ1234567890.-!';
-    const rand = (min = 0, max = 1000) => Math.floor(Math.random() * (max - min) + min);
-    const randchars = [];
-    for (let i = 0; i < 50; i++) {
-        randchars.push(chars[rand(0, chars.length)]);
-    }
+export function generateToken(uuid, password) {
+    const firstHash = crypto.createHash("sha256").update(`${uuid}:${password}`).digest("hex");
+    const secondHash = crypto.createHash("sha256").update(`${password}:${uuid}`).digest("hex");
+    const thirdHash = crypto.createHash("sha256").update(`${password+uuid}`).digest("hex");
 
-    return randchars.join('');
+    return `${firstHash}.${secondHash}.${thirdHash}`;
 }
 
 export class User {
@@ -23,7 +20,7 @@ export class User {
         this.name = data.name
         this.nickname = data.nickname
         this.token = data.token
-        this.status = statuses[data.status]
+        this.status = data.status
         this.conversationsWith = data.conversationsWith
         this.lastExitTime = data.lastExitTime ? new Date(data.lastExitTime * 1000) : null;
     }
@@ -32,6 +29,7 @@ export class User {
         let data = this.data;
         
         // WTF is this :skull:
+
         delete data.token
         delete data.status
         delete data.conversationsWith
@@ -40,11 +38,4 @@ export class User {
 
         return data;
     }
-}
-
-export const statuses = {
-    0: "online",
-    1: "do not disturb",
-    2: "hidden",
-    3: "offline"
 }

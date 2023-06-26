@@ -1,7 +1,12 @@
-require("dotenv").config();
-const server = require("./server");
+import dotenv from "dotenv";
+import server from "./server.js";
 
-server.run(
+dotenv.config()
+
+console.log(process.env.dbConnectUri)
+console.log(process.env.httpServerPort)
+
+server(
     process.env.httpServerPort, 
     process.env.socketServerPort,
     process.env.dbConnectUri

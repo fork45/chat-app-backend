@@ -20,7 +20,4 @@
 | 17   | Invalid RSA key           | 400
 | 18   | User didn't created conversation with you | 400
 | 19   | You already sent RSA key  | 400
-| 20   | Avatar file can't be larger than 10 megabytes | 400
-| 21   | Avatar not found | 404
-| 22   | Avatar can be only jpeg or png | 400
-| 23   | You can't send empty file to server | 400
+| 20   | Incorrect password        | 400

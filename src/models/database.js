@@ -1,13 +1,14 @@
 import { MongoClient } from "mongodb";
-import crypto, { createHash, UUID } from "crypto";
-import { User, generateToken } from "./users";
-import { Message } from "./messages"
+import crypto, { createHash } from "crypto";
+import { User, generateToken } from "./users.js";
+import { Message, generateId } from "./messages.js"
 
 export class DatabaseService {
 
     constructor(uri) {
         this.uri = uri;
-        this.client = new MongoClient(uri);
+        this.client = new MongoClient(uri, {useNewUrlParser: true});
+        this.client.connect();
 
         this.database = this.client.db("main");
         this.users = this.database.collection("users");
@@ -21,12 +22,14 @@ export class DatabaseService {
      * @returns {User | false}
      */
     async addUser(nickname, name, password) {
-        let token = generateToken();
-        let tokenHash = createHash("sha256").update(token).digest("hex").toString()
         let uuid = crypto.randomUUID();
+        let token = generateToken(uuid, password);
+        let tokenHash = createHash("sha256").update(token).digest("hex").toString()
         let passwordHash = createHash("sha256").update(password).digest("hex").toString();
 
         if (!(this.checkName(name))) return false;
+
+        let userObject;
 
         await this.users.insertOne({
             _id: uuid,
@@ -36,22 +39,42 @@ export class DatabaseService {
             token: tokenHash,
             status: "online",
             conversationsWith: [],
-            lastExitTime: null,
-            avatar: null
-        });
-
-        let userObject = new User({
-            _id: uuid,
-            name: name,
-            nickname: nickname,
-            token: token,
-            status: "online",
-            conversationsWith: [],
-            lastExitTime: null,
-            avatar: null,
+            lastExitTime: null
+        }).then(document => {
+            userObject = new User({
+                _id: uuid,
+                name: name,
+                nickname: nickname,
+                token: token,
+                status: "online",
+                conversationsWith: [],
+                lastExitTime: null,
+            });
         });
 
         return userObject;
+    }
+
+    /**
+     * 
+     * @param {string} name 
+     * @param {string} password 
+     * @returns {[User, string] | [false, string]}
+     */
+    async login(name, password) {
+        let user = await this.getUserWithName(name);
+
+        if (!user) {
+            return [false, "no user"];
+        }
+
+        let token = generateToken(user.uuid, password);
+
+        if (crypto.createHash("sha256").update(token).digest("hex") !== user.token) {
+            return [false, "incorrect password"];
+        }
+
+        return [token, user];
     }
 
     /**
@@ -61,7 +84,9 @@ export class DatabaseService {
         await this.users.updateOne({
             _id: user
         }, {
-            lastExitTime: Math.floor(new Date().getTime() / 1000)
+            $set: {
+                lastExitTime: Math.floor(new Date().getTime() / 1000)
+            }
         });
     }
 
@@ -69,20 +94,28 @@ export class DatabaseService {
      * @param {UUID} user
      */
     async getUserMessagesAfterExitTime(user) {
-        let account = this.getUserWithUUID(user);
+        let account = await this.getUserWithUUID(user);
+        if (!account.lastExitTime) {
+            return null;
+        }
         
         let messages = this.messages.find({
-            type: "message",
-            datetime: {$gte: account.lastExitTime.getSeconds()},
-            $and: [
-                { $or: [{ author: user }, { author: from }] },
-                { $or: [{ receiver: user }, { receiver: from }] }
-            ]
+            type: "message", 
+            datetime: { $gte: account.lastExitTime.getTime() / 1000 },  
+            $or: [{ author: account.uuid }, { receiver: account.uuid }]
         }, {
             sort: [{ datetime: -1 }]
         });
 
-        return messages ? await messages.toArray() : [];
+        return await messages.toArray();
+    }
+
+    async getUserWithName(name) {
+        let data = await this.users.findOne({
+            name: name
+        });
+
+        return data ? new User(data) : null;
     }
 
     /**
@@ -93,17 +126,15 @@ export class DatabaseService {
     async getUserWithToken(token) {
         let tokenHash = crypto.createHash("sha256").update(token).digest("hex").toString();
 
-        let data = await this.users.findOne({
+        let user = await this.users.findOne({
             token: tokenHash
         });
 
-        if (!data) {
-            return undefined;
-        }
+        if (!user) return undefined
 
-        data.token = token
+        user.token = token
 
-        return new User(data);
+        return new User(user);
     }
 
     /**
@@ -113,7 +144,7 @@ export class DatabaseService {
      */
     async getUserWithUUID(uuid) {
         let data = await this.users.findOne({
-            "_id":  uuid
+            _id:  uuid
         })
 
         return data ? new User(data) : undefined;
@@ -128,15 +159,7 @@ export class DatabaseService {
         await this.users.updateOne({
             _id: user
         }, {
-            status: status
-        });
-    }
-
-    async setUserAvatar(user, avatar) {
-        await this.users.updateOne({
-            _id: user
-        }, {
-            avatar: avatar
+            $set: {status: status}
         });
     }
 
@@ -146,18 +169,18 @@ export class DatabaseService {
      * @param {UUID} from
      */
     async getUserMessages(user, from, limit=50) {
-        // (author == user or author == from) and (receiver == user or receiver == from)
+        // (author == user, receiver == from) or (author == from, receiver == user)
         let messages = this.messages.find({
             type: "message",
-            $and: [
-                { $or: [{ author: user }, { author: from }] },
-                { $or: [{ receiver: user }, { receiver: from }] }
-            ]
+            $or: [ 
+                { author: user, receiver: from }, 
+                { author: from, receiver: user }
+            ],
         }, {
             limit: limit,
             sort: [{datetime: -1}]
         });
-
+    
         return messages ? await messages.toArray() : [];
     }
 
@@ -211,10 +234,10 @@ export class DatabaseService {
      * @param {UUID} receiver 
      * @param {string} key 
      */
-    async sendKey(author, receiver, key) {
+    async sendKey(author, receiver, key, iv) {
         await this.messages.insertOne({
             type: "key",
-            _id: id,
+            _id: generateId(),
             author: author,
             receiver: receiver,
             content: key,
@@ -239,11 +262,10 @@ export class DatabaseService {
      */
     async deleteMessagesInConversation(user, secondUser) {
         await this.messages.deleteMany({
-            type: "message",
-            "$and": [
-                { $or: [{ author: user }, { author: secondUser }] },
-                { $or: [{ receiver: user }, { receiver: secondUser }] }
-            ]
+            $or: [
+                { author: user, receiver: secondUser },
+                { author: secondUser, receiver: user }
+            ],
         });
     }
 
@@ -257,8 +279,10 @@ export class DatabaseService {
             type: "message",
             _id: id
         }, {
-            content: content,
-            editDatetime: Math.floor(new Date().getTime() / 1000)
+            $set: {
+                content: content,
+                editDatetime: Math.floor(new Date().getTime() / 1000)
+            }
         })
     }
 
@@ -272,7 +296,6 @@ export class DatabaseService {
             type: "message",
             _id: id
         })
-
 
         return data ? new Message(data) : undefined;
     }
@@ -314,7 +337,7 @@ export class DatabaseService {
         await this.users.updateOne({
             _id: user,
         }, {
-            "$push": {conversationsWith: secondUser}
+            "$push": { conversationsWith: secondUser }
         });
     }
 
@@ -327,7 +350,7 @@ export class DatabaseService {
         await this.users.updateOne({
             _id: user,
         }, {
-            "$pull": { conversationsWith: secondUser }
+            $pull: { conversationsWith: secondUser }
         });
     }
 
@@ -336,7 +359,7 @@ export class DatabaseService {
      * @param {string} secondUser
      */
     async hasConversationWith(user, secondUser) {
-        let count = this.users.countDocuments({
+        let count = await this.users.countDocuments({
             _id: user,
             conversationsWith: { "$in": [secondUser] }
         })
@@ -350,22 +373,13 @@ export class DatabaseService {
      * @returns {boolean | null}
      */
     async conversationReady(user, secondUser) {
-        /**
-         * Maybe you don't get what i want to do
-         * when user X is trying to create conversation with user Y
-         * To user X in the `conversationsWith` is added user Y
-         * When user Y gives his RSA key, then user X is added to user Y `conversationsWith` and conversation is ready
-         * 
-         * To understand if user Y has given a key, I need to check if user Y `conversationsWith` has user X
-         */
+        let key = await this.messages.findOne({
+            type: "key",
+            author: user,
+            receiver: secondUser
+        })
 
-        if (!this.hasConversationWith(secondUser, user)) {
-            return null;
-        } else if (this.hasConversationWith(user, secondUser)) {
-            return true;
-        }
-
-        return false;
+        return key ? true : false;
     }
 
     async findWaitingUsers(user) {
@@ -389,7 +403,7 @@ export class DatabaseService {
     async getUserConversationsWith(user) {
         let account = await this.users.findOne({
             _id: user,
-        })
+        });
 
         return account.conversationsWith;
     }
@@ -402,7 +416,10 @@ export class DatabaseService {
     async markMessageAsRead(id) {
         await this.messages.updateOne({
             _id: id,
-            read: true
+        }, {
+            $set: {
+                read: true
+            }
         });
     }
 
