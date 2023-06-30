@@ -1,7 +1,7 @@
 {
-  "name": "qweert-backend",
+  "name": "chat-backend",
   "version": "1.0.0",
-  "description": "qweert backend",
+  "description": "chat app backend",
   "main": "src/app.js",
   "type": "module",
   "scripts": {
