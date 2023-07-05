@@ -7,3 +7,6 @@ If you want news about this project follow my [telegram channel](https://t.me/qw
 
 # List of contributors
 @fork45 ❤
+
+# Other repositories associated with this project
+[QWapi](https://github.com/fork45/QWapi) - Typescript library for working with this project
