@@ -2,11 +2,10 @@
   "name": "chat-backend",
   "version": "1.0.0",
   "description": "chat app backend",
-  "main": "src/app.js",
+  "main": "src/server.js",
   "type": "module",
   "scripts": {
-    "start": "node src/app.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node src/server.js"
   },
   "author": "fork45",
   "license": "MIT",

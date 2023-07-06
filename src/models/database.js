@@ -6,7 +6,7 @@ import { Message, generateId } from "./messages.js"
 export class DatabaseService {
 
     constructor(uri) {
-        this.uri = uri;
+        this.uri = uri
         this.client = new MongoClient(uri, {useNewUrlParser: true});
         this.client.connect();
 
@@ -91,6 +91,20 @@ export class DatabaseService {
     }
 
     /**
+     * 
+     * @param {import("crypto").UUID} user 
+     */
+    async getLastMessageInConversation(user) {
+        let message = await this.messages.findOne({
+            $or: [{ author: user }, { receiver: user }]
+        }, {
+            sort: [{ datetime: -1 }]
+        });
+
+        return message;
+    }
+
+    /**
      * @param {UUID} user
      */
     async getUserMessagesAfterExitTime(user) {
@@ -101,7 +115,7 @@ export class DatabaseService {
         
         let messages = this.messages.find({
             type: "message", 
-            datetime: { $gte: account.lastExitTime.getTime() / 1000 },  
+            datetime: { $gte: account.lastExitTime.getTime() / 1000 },
             $or: [{ author: account.uuid }, { receiver: account.uuid }]
         }, {
             sort: [{ datetime: -1 }]
