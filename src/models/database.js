@@ -331,6 +331,21 @@ export class DatabaseService {
 
     /**
      * 
+     * @param {UUID} first_user 
+     * @param {UUID} second_user 
+     */
+    async getKey(first_user, second_user) {
+        let key = await this.messages.findOne({
+            type: "key",
+            author: first_user,
+            receiver: second_user
+        });
+
+        return key;
+    }
+
+    /**
+     * 
      * @param {string} id 
      */
     async messageExists(id) {

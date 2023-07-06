@@ -274,6 +274,26 @@ httpServer.post("/key", async (request, response) => {
     response.status(204).send();
 });
 
+httpServer.get("/keys/:user", async (request, response) => {
+    if (!request.params.user) 
+        return new errors.UserNotFound(request);
+
+    try {
+        var author = await checkRequester(request);
+    } catch (error) {
+        return;
+    }
+
+    if (!(await databaseService.getUserWithUUID(request.params.user)))
+        return new errors.UserNotFound
+    else if (!(await databaseService.hasConversationWith(request.params.user, author)) || !(await databaseService.hasConversationWith(request.params.user, author)))
+        return new errors.NoConversation(request);
+    
+    let key = await databaseService.getKey(request.params.user, author.uuid);
+
+    response.json({key: key});
+})
+
 httpServer.get("/:user/messages", async (request, response) => {
     if (!request.params.user) {
         new errors.UserNotFound(request);
@@ -334,7 +354,7 @@ httpServer.get("/messages/:message", async (request, response) => {
         return;
     }
 
-    let message = databaseService.getMessage(request.params.message);
+    let message = await databaseService.getMessage(request.params.message);
 
     if (!message) return new errors.MessageDoesNotExists(request);
 
@@ -369,7 +389,7 @@ httpServer.post("/messages", async (request, response) => {
 
     const id = generateId();
 
-    databaseService.addMessage(id, author.uuid, userUUID, request.body.content);
+    await databaseService.addMessage(id, author.uuid, userUUID, request.body.content);
 
     let socket = await findSocket(userUUID);
 
@@ -633,7 +653,7 @@ async function checkRequester(request, checkInDatabase = true) {
     }
 
     if (checkInDatabase) {
-        let user = databaseService.getUserWithToken(request.header("authorization"));
+        let user = await databaseService.getUserWithToken(request.header("authorization"));
 
         if (!user) {
             throw new errors.InvalidToken(request);
