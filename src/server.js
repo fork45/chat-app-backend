@@ -5,11 +5,16 @@ import { DatabaseService } from "./models/database.js";
 import { generateId } from "./models/messages.js";
 import * as errors from "./errors.js";
 import crypto from "crypto";
+import { StorageService } from "./models/storage.js";
+import sharp from "sharp";
 
 dotenv.config();
 export const httpServer = express();
 export const io = new Server();
 const databaseService = new DatabaseService(process.env.dbConnectUri);
+const storage = new StorageService(process.env.accessKeyId, process.env.secretAccessKey, {
+    avatars: process.env.avatarsBucket
+});
 
 httpServer.use(express.json());
 
@@ -80,6 +85,68 @@ httpServer.get("/login/:name/:password", async (request, response) => {
     data.token = token
 
     response.json(data);
+});
+
+httpServer.post("/avatars", async (request, response) => {
+    if (!request.file) {
+        new errors.InvalidAvatarSize(request);
+
+        return;
+    } else if (request.file.mimetype !== "image/png" || request.file.mimetype !== "image/jpeg") {
+        new errors.AvatarCanBeOnlyPngOrJpeg(request);
+
+        return;
+    } else if (request.file.size > 10000000 || request.file.size === 0) {
+        new errors.InvalidAvatarSize(request);
+
+        return;
+    }
+
+    const metadata = await sharp(request.file.buffer).metadata();
+    if (metadata.format !== "jpeg" || metadata.format !== "png") {
+        new errors.AvatarCanBeOnlyPngOrJpeg(request);
+
+        return;
+    }
+
+    try {
+        var author = await checkRequester(request);
+    } catch (error) {
+        return;
+    }
+
+    let avatar = author.avatar
+    if (avatar)
+        await storage.deleteAvatar(avatar);
+
+    let [responseAvatar, hash] = await storage.saveAvatar(request.file);
+
+    await databaseService.setAvatar(author.uuid, hash);
+
+    response.status(200).send({
+        hash: hash
+    });
+
+    io.in(author.uuid).emit("avatarChange", { hash: hash });
+});
+
+httpServer.get("/avatars/:hash", async (request, response) => {
+    if (!request.params.hash) {
+        new errors.AvatarNotFound(request);
+        
+        return;
+    }
+
+    const avatar = await storage.getAvatar(request.params.hash);
+
+    if (!avatar) {
+        new errors.AvatarNotFound(request);
+
+        return;
+    }
+
+    response.setHeader("Content-disposition", "attachment; filename=" + request.params.hash);
+    response.type(avatar.ContentType).send(avatar.Body);
 });
 
 httpServer.get("/conversations/:user", async (request, response) => {

@@ -20,3 +20,6 @@
 | 17   | User didn't created conversation with you | 400
 | 18   | You already sent RSA key  | 400
 | 19   | Incorrect password        | 400
+| 20   | Avatar can't be empty or bigger than 10 megabytes | 400
+| 21   | Avatar can be only png or jpeg | 400
+| 22   | Avatar not found          | 404

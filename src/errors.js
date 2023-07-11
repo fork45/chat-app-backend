@@ -327,6 +327,51 @@ export class IncorrectPassword extends ClientError {
 
 }
 
+export class InvalidAvatarSize extends ClientError {
+
+    /**
+     * 
+     * @param {import("express").Request | Socket} request
+     */
+    constructor(request) {
+        super(request, 400, {
+            opcode: 20,
+            message: "Avatar can't be empty or bigger than 10 megabytes"
+        });
+    }
+
+}
+
+export class AvatarCanBeOnlyPngOrJpeg extends ClientError {
+
+    /**
+     * 
+     * @param {import("express").Request | Socket} request
+     */
+    constructor(request) {
+        super(request, 400, {
+            opcode: 21,
+            message: "Avatar can be only png or jpeg"
+        });
+    }
+
+}
+
+export class AvatarNotFound extends ClientError {
+
+    /**
+     * 
+     * @param {import("express").Request | Socket} request
+     */
+    constructor(request) {
+        super(request, 404, {
+            opcode: 22,
+            message: "Avatar not found"
+        });
+    }
+
+}
+
 /**
  * @typedef {Object} ErrorResponse
  * @property {number} opcode

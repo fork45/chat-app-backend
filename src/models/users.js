@@ -23,6 +23,7 @@ export class User {
         this.status = data.status
         this.conversationsWith = data.conversationsWith
         this.lastExitTime = data.lastExitTime ? new Date(data.lastExitTime * 1000) : null;
+        this.avatar = data.avatar
     }
 
     generateSecureJson() {

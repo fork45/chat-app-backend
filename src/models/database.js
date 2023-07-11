@@ -39,7 +39,8 @@ export class DatabaseService {
             token: tokenHash,
             status: "online",
             conversationsWith: [],
-            lastExitTime: null
+            lastExitTime: null,
+            avatar: null,
         }).then(document => {
             userObject = new User({
                 _id: uuid,
@@ -174,6 +175,19 @@ export class DatabaseService {
             _id: user
         }, {
             $set: {status: status}
+        });
+    }
+
+    /**
+     * 
+     * @param {import("crypto").UUID} uuid 
+     * @param {string} hash 
+     */
+    async setAvatar(uuid, hash) {
+        await this.users.updateOne({
+            _id: uuid
+        }, {
+            $set: { avatar: hash }
         });
     }
 
