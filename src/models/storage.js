@@ -1,4 +1,4 @@
-import { S3Client, S3 } from "@aws-sdk/client-s3";
+import { S3 } from "@aws-sdk/client-s3";
 import crypto from "crypto";
 import sharp from "sharp";
 
