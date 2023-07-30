@@ -218,7 +218,7 @@ httpServer.post("/avatars", async (request, response) => {
         hash: hash
     });
 
-    io.in(author.uuid).emit("avatarChange", { hash: hash });
+    io.in(author.uuid).emit("avatarChange", { user: author.uuid, hash: hash });
 });
 
 httpServer.get("/avatars/:hash", async (request, response) => {
