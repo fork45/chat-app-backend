@@ -28,6 +28,7 @@ export class DatabaseService {
         let passwordHash = createHash("sha256").update(password).digest("hex").toString();
 
         if (!(this.checkName(name))) return false;
+        if (!(this.checkNickname(nickname))) return false;
 
         let userObject;
 
@@ -54,6 +55,59 @@ export class DatabaseService {
         });
 
         return userObject;
+    }
+
+    /**
+     * 
+     * @param {string} uuid 
+     */
+    async deleteUser(uuid) {
+        let user = await this.getUserWithUUID(uuid);
+
+        let conversations = user.conversationsWith
+
+        for (const conversation in conversations) {
+            await this.deleteMessagesInConversation(user, conversation);
+
+            await this.removeConversationFromUser(user, conversation);
+            await this.removeConversationFromUser(conversation, user);
+        }
+
+        await this.users.deleteOne({
+            _id: uuid
+        });
+    }
+
+    /**
+     * 
+     * @param {UUID} id 
+     * @param {string} newPassword 
+     * @returns {string} New Token
+     */
+    async changePassword(id, newPassword) {
+        let hash = crypto.createHash("sha256").update(newPassword).digest("hex");
+        let token = generateToken(id, newPassword);
+
+        await this.users.updateOne({
+            _id: id
+        }, {
+            $set: {
+                password: hash,
+                token: token
+            }
+        });
+
+        return token;
+    }
+
+    async changeNickname(id, nickname) {
+        await this.users.updateOne({
+            _id: id
+        }, {
+            $set: {
+                nickname: nickname
+            }
+        });
     }
 
     /**
@@ -468,13 +522,13 @@ export class DatabaseService {
 
 
     /**
-     * Checks if nickname is not taken and fits to name regex
+     * Checks if name is not taken and fits to name regex
      * @param {string} name
-     * @returns {void} returns is nickname taken and fits to name regex
+     * @returns {boolean} returns is name taken and fits to name regex
      */
     checkName(name) {
-        const regex = new RegExp("^[a-zA-Z0-9_-]+$")
-        if (!(regex.test(name))) return false;
+        const regex = this.checkNickname(name);
+        if (!regex) return false;
 
         let userCount = this.users.countDocuments({
             name: name
@@ -483,6 +537,17 @@ export class DatabaseService {
         if (userCount >= 1) return false;
 
         return true
+    }
+
+    /**
+     * Checks if nickname fits to nickname regex
+     * @param {string} nickname
+     * @returns {boolean} returns is fits to nickname regex
+     */
+    checkNickname(nickname) {
+        const regex = new RegExp("^[a-zA-Z0-9_-]+$")
+        
+        return regex.test(nickname);
     }
 
     /**

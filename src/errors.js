@@ -115,7 +115,7 @@ export class InvalidPasswordLength extends ClientError {
 
 }
 
-export class NameDoesNotMatchRegex extends ClientError {
+export class NameOrNicknameDoesNotMatchRegex extends ClientError {
 
     /**
      * 
@@ -125,7 +125,7 @@ export class NameDoesNotMatchRegex extends ClientError {
         this.regex = new RegExp("^[a-zA-Z0-9_-]+$");
         super(request, 400, {
             opcode: 6,
-            message: `Your name does not match this regex: ${this.regex.source}`
+            message: `Your name or nickname does not match this regex: ${this.regex.source}`
         });
     }
 
@@ -371,6 +371,37 @@ export class AvatarNotFound extends ClientError {
     }
 
 }
+
+export class InvalidMessagesNumber extends ClientError {
+
+    /**
+     * 
+     * @param {import("express").Request | Socket} request 
+     */
+    constructor(request) {
+        super(request, 400, {
+            opcode: 23,
+            message: "You can only delete more than 2 and less than 100 messages in one request"
+        });
+    }
+};
+
+export class InvalidMessageId extends ClientError {
+
+    /**
+     * 
+     * @param {import("express").Request | Socket} request 
+     * @param {string} id 
+     */
+    constructor(request, id) {
+        super(request, 400, {
+            opcode: 24,
+            message: "One of the id is invalid: " + id
+        });
+
+        this.id = id
+    }
+};
 
 /**
  * @typedef {Object} ErrorResponse

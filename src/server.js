@@ -28,6 +28,97 @@ httpServer.get("/@me", async (request, response) => {
     response.json(user.generateSecureJson());
 });
 
+httpServer.delete("/@me", async (request, response) => {
+    try {
+        var user = await checkRequester(request);
+    } catch (error) {
+        return;
+    }
+
+    if (!request.body.password) {
+        new errors.IncorrectPassword(request);
+        
+        return;
+    }
+
+    let [successful, message] = await databaseService.login(user.name, request.body.password);
+
+    if (!successful) {
+        new errors.IncorrectPassword(request);
+
+        return;
+    }
+
+    await databaseService.deleteUser(user.uuid);
+
+    await storage.deleteAvatar(user.avatar);
+
+    response.sendStatus(204);
+    
+    for (const conversationUser in user.conversationsWith) {
+        let socket = await findSocket(conversationUser);
+
+        if (socket) {
+            socket.emit("userDelete", {user: user.uuid});
+        }
+    }
+});
+
+httpServer.patch("/@me/nickname", async (request, response) => {
+    try {
+        var user = await checkRequester(request);
+    } catch (error) {
+        return;
+    }
+
+    if (!request.body.nickname || (request.body.nickname.length > 255 || request.body.nickname.length <= 3)) {
+        new errors.InvalidNicknameOrNameLength(request);
+
+        return;
+    } else if (!databaseService.checkNickname(request.body.nickname)) {
+        new errors.NameOrNicknameDoesNotMatchRegex(request);
+
+        return;
+    }
+
+    await databaseService.changeNickname(user.uuid, request.body.nickname);
+    
+    response.sendStatus(204);
+
+    io.in(user.uuid).emit("nicknameChange", {
+        user: user.uuid,
+        nickname: request.body.nickname
+    });
+});
+
+httpServer.patch("/@me/password", async (request, response) => {
+    try {
+        var user = await checkRequester(request);
+    } catch (error) {
+        return;
+    }
+
+    if (!request.body.password) {
+        new errors.IncorrectPassword(request);
+        
+        return;
+    }
+
+    let [successful, message] = await databaseService.login(user.name, request.body.password);
+
+    if (!successful) {
+        new errors.IncorrectPassword(request);
+
+        return;
+    }
+
+    let token = await databaseService.changePassword(user.uuid, request.body.new);
+
+    response.json({
+        token: token
+    });
+})
+
 httpServer.post("/accounts", async (request, response) => {
     if ((request.body.nickname.length > 255 || request.body.nickname.length <= 3) || (request.body.name.length > 255 || request.body.name.length <= 3)) {
         new errors.InvalidNicknameOrNameLength(request);
@@ -42,7 +133,7 @@ httpServer.post("/accounts", async (request, response) => {
     let user = await databaseService.addUser(request.body.nickname, request.body.name, request.body.password);
     
     if (user === false) {
-        new errors.NameDoesNotMatchRegex(request);
+        new errors.NameOrNicknameDoesNotMatchRegex(request);
 
         return;
     }
@@ -513,7 +604,52 @@ httpServer.delete("/messages/:message", async (request, response) => {
     response.status(204).send();
 });
 
-httpServer.delete("/:user/messages/purge", (request, response) => {});
+// TODO: Delete messages
+httpServer.post("/:user/messages/purge", async (request, response) => {
+    if (request.body.messages.length > 100 || request.body.messages.length < 2) {
+        new errors.InvalidMessagesNumber(request);
+
+        return;
+    }
+
+    try {
+        var user = await checkRequester(request);
+    } catch (error) {
+        return;
+    }
+    let interlocutor = await databaseService.getUserWithUUID(request.params.user);
+    if (!interlocutor) {
+        new errors.UserNotFound(request);
+
+        return;
+    }
+
+    for (let index = 0; index < request.body.messages.length; index++) {
+        let message = await databaseService.getMessage(request.body.messages[index]);
+
+        if (!message) {
+            new errors.InvalidMessageId(request, request.body.messages[index]);
+
+            return;
+        } else if (message.author !== user.uuid) {
+            new errors.CannotDeleteMessage(request);
+
+            return;
+        }
+
+        await databaseService.deleteMessage(request.body.messages[index]);
+    }
+    
+    response.sendStatus(204);
+
+    interlocutor = findSocket(interlocutor.uuid);
+
+    if (interlocutor) {
+        interlocutor.emit("deleteMessages", {
+            messages: request.body.messages
+        });
+    }
+});
 
 httpServer.patch("/messages", async (request, response) => {
     if (request.body.content.length > 1200 || request.body.content.length <= 0) {
@@ -559,7 +695,6 @@ httpServer.patch("/messages", async (request, response) => {
 
     response.status(204).send();
 });
-
 
 httpServer.get("*", (request, response) => {
     response.sendStatus(404);
