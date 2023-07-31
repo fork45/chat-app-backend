@@ -14,7 +14,7 @@ export class Message {
     constructor(data) {
         this.data = data
 
-        this._id = data._id
+        this.id = data.id
         this.content = data.content
         this.type = "message"
         this.author = data.author

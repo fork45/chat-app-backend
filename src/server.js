@@ -25,7 +25,7 @@ httpServer.get("/@me", async (request, response) => {
         return;
     }
 
-    response.json(user.generateSecureJson());
+    response.json(user.data);
 });
 
 httpServer.delete("/@me", async (request, response) => {
@@ -35,19 +35,13 @@ httpServer.delete("/@me", async (request, response) => {
         return;
     }
 
-    if (!request.body.password) {
-        new errors.IncorrectPassword(request);
-        
-        return;
-    }
+    if (!request.body.password)
+        return new errors.IncorrectPassword(request);
 
     let [successful, message] = await databaseService.login(user.name, request.body.password);
 
-    if (!successful) {
-        new errors.IncorrectPassword(request);
-
-        return;
-    }
+    if (!successful)
+        return new errors.IncorrectPassword(request);
 
     await databaseService.deleteUser(user.uuid);
 
@@ -71,15 +65,10 @@ httpServer.patch("/@me/nickname", async (request, response) => {
         return;
     }
 
-    if (!request.body.nickname || (request.body.nickname.length > 255 || request.body.nickname.length <= 3)) {
-        new errors.InvalidNicknameOrNameLength(request);
-
-        return;
-    } else if (!databaseService.checkNickname(request.body.nickname)) {
-        new errors.NameOrNicknameDoesNotMatchRegex(request);
-
-        return;
-    }
+    if (!request.body.nickname || (request.body.nickname.length > 255 || request.body.nickname.length <= 3))
+        return new errors.InvalidNicknameOrNameLength(request);
+    else if (!databaseService.checkNickname(request.body.nickname))
+        return new errors.NameOrNicknameDoesNotMatchRegex(request);
 
     await databaseService.changeNickname(user.uuid, request.body.nickname);
     
@@ -98,19 +87,13 @@ httpServer.patch("/@me/password", async (request, response) => {
         return;
     }
 
-    if (!request.body.password) {
-        new errors.IncorrectPassword(request);
-        
-        return;
-    }
+    if (!request.body.password)
+        return new errors.IncorrectPassword(request);
 
     let [successful, message] = await databaseService.login(user.name, request.body.password);
 
-    if (!successful) {
-        new errors.IncorrectPassword(request);
-
-        return;
-    }
+    if (!successful)
+        return new errors.IncorrectPassword(request);
 
     let token = await databaseService.changePassword(user.uuid, request.body.new);
 
@@ -120,26 +103,18 @@ httpServer.patch("/@me/password", async (request, response) => {
 })
 
 httpServer.post("/accounts", async (request, response) => {
-    if ((request.body.nickname.length > 255 || request.body.nickname.length <= 3) || (request.body.name.length > 255 || request.body.name.length <= 3)) {
-        new errors.InvalidNicknameOrNameLength(request);
-
-        return;
-    } else if (request.body.password.length < 8) {
-        new errors.InvalidPasswordLength(request);
-
-        return;
-    }
+    if ((request.body.nickname.length > 255 || request.body.nickname.length <= 3) || (request.body.name.length > 255 || request.body.name.length <= 3))
+        return new errors.InvalidNicknameOrNameLength(request);
+    else if (request.body.password.length < 8)
+        return new errors.InvalidPasswordLength(request);
 
     let user = await databaseService.addUser(request.body.nickname, request.body.name, request.body.password);
     
-    if (user === false) {
-        new errors.NameOrNicknameDoesNotMatchRegex(request);
-
-        return;
-    }
+    if (user === false)
+        return new errors.NameOrNicknameDoesNotMatchRegex(request);
 
     response.json({
-        _id: user.uuid,
+        id: user.uuid,
         name: user.name,
         nickname: user.nickname,
         token: user.token
@@ -160,13 +135,13 @@ httpServer.get("/login/:name/:password", async (request, response) => {
     const name = request.params.name
     const password = request.params.password
 
-    let [token, user] = await databaseService.login(name, password);
+    let [user, token] = await databaseService.login(name, password);
 
-    if (user === "no user") {
+    if (token === "no user") {
         new errors.UserNotFound(request);
 
         return;
-    } else if (user === "incorrect password") {
+    } else if (token === "incorrect password") {
         new errors.IncorrectPassword(request);
 
         return;
@@ -179,26 +154,16 @@ httpServer.get("/login/:name/:password", async (request, response) => {
 });
 
 httpServer.post("/avatars", async (request, response) => {
-    if (!request.file) {
-        new errors.InvalidAvatarSize(request);
-
-        return;
-    } else if (request.file.mimetype !== "image/png" || request.file.mimetype !== "image/jpeg") {
-        new errors.AvatarCanBeOnlyPngOrJpeg(request);
-
-        return;
-    } else if (request.file.size > 10000000 || request.file.size === 0) {
-        new errors.InvalidAvatarSize(request);
-
-        return;
-    }
+    if (!request.file)
+        return new errors.InvalidAvatarSize(request);
+    else if (request.file.mimetype !== "image/png" || request.file.mimetype !== "image/jpeg")
+        return new errors.AvatarCanBeOnlyPngOrJpeg(request);
+    else if (request.file.size > 10000000 || request.file.size === 0)
+        return new errors.InvalidAvatarSize(request);
 
     const metadata = await sharp(request.file.buffer).metadata();
-    if (metadata.format !== "jpeg" || metadata.format !== "png") {
-        new errors.AvatarCanBeOnlyPngOrJpeg(request);
-
-        return;
-    }
+    if (metadata.format !== "jpeg" || metadata.format !== "png")
+        return new errors.AvatarCanBeOnlyPngOrJpeg(request);
 
     try {
         var author = await checkRequester(request);
@@ -222,51 +187,37 @@ httpServer.post("/avatars", async (request, response) => {
 });
 
 httpServer.get("/avatars/:hash", async (request, response) => {
-    if (!request.params.hash) {
-        new errors.AvatarNotFound(request);
-        
-        return;
-    }
+    if (!request.params.hash)
+        return new errors.AvatarNotFound(request);
 
     const avatar = await storage.getAvatar(request.params.hash);
 
-    if (!avatar) {
-        new errors.AvatarNotFound(request);
-
-        return;
-    }
+    if (!avatar)
+        return new errors.AvatarNotFound(request);
 
     response.setHeader("Content-disposition", "attachment; filename=" + request.params.hash);
     response.type(avatar.ContentType).send(avatar.Body);
 });
 
 httpServer.get("/conversations/:user", async (request, response) => {
-    if (!request.params.user) {
-        new errors.UserNotFound(request);
-
-        return;
-    }
+    if (!request.params.user)
+        return new errors.UserNotFound(request);
+    
     try {
         var author = await checkRequester(request);
     } catch {
         return;
     }
 
-    if (!(await databaseService.hasConversationWith(request.params.user, author.uuid))) {
-        new errors.DidNotCreatedConversation(request);
-
-        return;
-    }
+    if (!(await databaseService.hasConversationWith(request.params.user, author.uuid)))
+        return new errors.DidNotCreatedConversation(request);
 
     let user = await databaseService.getUserWithUUID(request.params.user);
 
-    if (!user) {
-        new errors.UserNotFound(request);
+    if (!user)
+        return new errors.UserNotFound(request);
 
-        return;
-    }
-
-    let data = user.generateSecureJson();
+    let data = user.data;
     data.lastMessage = await databaseService.getLastMessageInConversation(user.uuid);
 
     response.status(200).json(data);
@@ -285,67 +236,52 @@ httpServer.get("/conversations", async (request, response) => {
 });
 
 httpServer.post("/conversations", async (request, response) => {
+    if (!request.body.key)
+        return new errors.InvalidRSAKey(request);
+    
     try {
         var author = await checkRequester(request);
     } catch (error) {
-        return;
-    }
-    
-    if (!request.body.key) {
-        new errors.InvalidRSAKey(request);
-
         return;
     }
 
     try {
         crypto.publicEncrypt(request.body.key, Buffer.from("TestRsaCryptoMessagePublicKeyDescryptVerification1234567890$%^&*()!@#/|-/|<>?.,;"));
     } catch (error) {
-        new errors.InvalidRSAKey(request);
-
-        return;
+        return new errors.InvalidRSAKey(request);
     }
 
     let user = await databaseService.getUserWithName(request.body.user);
 
-    if (!user) {
-        new errors.UserNotFound(request);
-
-        return;
-    } else if (await databaseService.hasConversationWith(user.uuid, author.uuid)) {
-        new errors.AlreadyHasConversation(request);
-
-        return;
-    }
+    if (!user)
+        return new errors.UserNotFound(request);
+    else if (await databaseService.hasConversationWith(user.uuid, author.uuid))
+        return new errors.AlreadyHasConversation(request);
 
     await databaseService.addConversationToUser(author.uuid, user.uuid);
     await databaseService.sendKey(author.uuid, user.uuid, request.body.key);
 
-    findSocket(user.uuid)
-        .then(socket => {
-            if (socket) {
-                socket.emit("newConversation", {
-                    user: author.uuid
-                });
-            }
+    user = await findSocket(user.uuid)
+    
+    if (user) {
+        user.emit("newConversation", {
+            user: author.uuid
         });
+    }
 
-    let authorSocket = findSocket(author)
-        .then(socket => {
-            if (socket) {
-                let status = socket ? (socket.data.status === "hidden" ? "offline" : socket.data.status) : "offline"
-                authorSocket.emit("status", { status: status });
-            }
-        });
+    let authorSocket = findSocket(author);
 
-    response.status(204).send();
+    if (authorSocket) {
+        let status = authorSocket ? (authorSocket.data.status === "hidden" ? "offline" : authorSocket.data.status) : "offline"
+        authorSocket.emit("status", { status: status });
+    }
+
+    response.sendStatus(204);
 });
 
 httpServer.delete("/conversations/:user", async (request, response) => {
-    if (!request.params.user) {
-        new errors.UserNotFound(request);
-
-        return;
-    }
+    if (!request.params.user)
+        return new errors.UserNotFound(request);
 
     try {
         var author = await checkRequester();
@@ -355,15 +291,10 @@ httpServer.delete("/conversations/:user", async (request, response) => {
 
     let user = await databaseService.getUserWithUUID(request.params.user);
 
-    if (!user) {
-        new errors.UserNotFound(request);
-
-        return;
-    } else if (!(await databaseService.hasConversationWith(user.uuid, author.uuid))) {
-        new errors.NoConversation(request);
-
-        return;
-    }
+    if (!user)
+        return new errors.UserNotFound(request);
+    else if (!(await databaseService.hasConversationWith(user.uuid, author.uuid)))
+        return new errors.NoConversation(request);
 
     await databaseService.removeConversationFromUser(author.uuid, user.uuid);
     await databaseService.removeConversationFromUser(user.uuid, author.uuid);
@@ -378,7 +309,7 @@ httpServer.delete("/conversations/:user", async (request, response) => {
         });
     }
 
-    response.status(204).send();
+    response.sendStatus(204);
 });
 
 httpServer.post("/key", async (request, response) => {
@@ -429,7 +360,7 @@ httpServer.post("/key", async (request, response) => {
         });
     }
 
-    response.status(204).send();
+    response.sendStatus(204);
 });
 
 httpServer.get("/keys/:user", async (request, response) => {
@@ -453,24 +384,15 @@ httpServer.get("/keys/:user", async (request, response) => {
 })
 
 httpServer.get("/:user/messages", async (request, response) => {
-    if (!request.params.user) {
-        new errors.UserNotFound(request);
-
-        return;
-    }
+    if (!request.params.user)
+        return new errors.UserNotFound(request);
     
     if (!request.query.limit || request.query.limit <= 101 || request.query.limit <= 0) {
         request.body.limit = 50
     }
 
-    if (request.body.limit < 1 || request.body.limit > 100) {
-        response.status(400).json({
-            opcode: 14,
-            message: "Limit should be more than 1 and less than 100"
-        });
-
-        return;
-    }
+    if (request.body.limit < 1 || request.body.limit > 100)
+        return new errors.InvalidLimit(request);
 
     try {
         var user = await checkRequester(request);
@@ -480,11 +402,11 @@ httpServer.get("/:user/messages", async (request, response) => {
 
     let interlocutor = await databaseService.getUserWithUUID(request.params.user);
 
-    if (!interlocutor) {
-        new errors.UserNotFound(request);
+    if (!interlocutor)
+        return new errors.UserNotFound(request);
 
-        return;
-    }
+    if (!await databaseService.hasConversationWith(interlocutor.uuid, user.uuid))
+        return new errors.NoConversation(request);
 
     let messages = [];
 
@@ -504,7 +426,8 @@ httpServer.get("/:user/messages", async (request, response) => {
 });
 
 httpServer.get("/messages/:message", async (request, response) => {
-    if (!request.params.message) return new errors.MessageDoesNotExists(request);
+    if (!request.params.message)
+        return new errors.MessageDoesNotExists(request);
     
     try {
         var user = await checkRequester(request);
@@ -545,6 +468,12 @@ httpServer.post("/messages", async (request, response) => {
         return;
     }
 
+    if (!await databaseService.hasConversationWith(user.uuid, author.uuid)) {
+        new errors.NoConversation(request);
+        
+        return;
+    }
+
     const id = generateId();
 
     await databaseService.addMessage(id, author.uuid, userUUID, request.body.content);
@@ -553,23 +482,20 @@ httpServer.post("/messages", async (request, response) => {
 
     if (socket) {
         socket.emit("newMessage", {
-            _id: id,
+            id: id,
             user: author.uuid,
             content: request.body.content
         });
     }
 
     response.status(200).json({
-        _id: id
+        id: id
     });
 });
 
 httpServer.delete("/messages/:message", async (request, response) => {
-    if (!request.params.message) {
-        new errors.MessageDoesNotExists(request);
-
-        return;
-    }
+    if (!request.params.message)
+        return new errors.MessageDoesNotExists(request);
 
     try {
         var user = await checkRequester(request);
@@ -578,64 +504,47 @@ httpServer.delete("/messages/:message", async (request, response) => {
     }
 
     let message = await databaseService.getMessage(request.params.message);
-    let receiver = await databaseService.getUserWithUUID(message.receiver);
     
-    if (!message) {
-        new errors.MessageDoesNotExists(request);
-
-        return;
-    } else if (message.author !== user.uuid) {
-        new errors.CannotDeleteMessage(request);
-
-        return;
-    }
+    if (!message)
+        return new errors.MessageDoesNotExists(request);
+    else if (message.author !== user.uuid)
+        return new errors.CannotDeleteMessage(request);
 
     await databaseService.deleteMessage(request.params.message);
 
-    let socket = await findSocket(receiver.uuid);
+    let socket = await findSocket(message.receiver);
 
     if (socket) {
         socket.emit("deleteMessage", {
             user: user.uuid,
-            _id: request.body._id
-        });            
+            id: message.id
+        });
     }
 
-    response.status(204).send();
+    response.sendStatus(204);
 });
 
-// TODO: Delete messages
 httpServer.post("/:user/messages/purge", async (request, response) => {
-    if (request.body.messages.length > 100 || request.body.messages.length < 2) {
-        new errors.InvalidMessagesNumber(request);
-
-        return;
-    }
+    if (request.body.messages.length > 100 || request.body.messages.length < 2)
+        return new errors.InvalidMessagesNumber(request);
 
     try {
         var user = await checkRequester(request);
     } catch (error) {
         return;
     }
-    let interlocutor = await databaseService.getUserWithUUID(request.params.user);
-    if (!interlocutor) {
-        new errors.UserNotFound(request);
 
-        return;
-    }
+    let interlocutor = await databaseService.getUserWithUUID(request.params.user);
+    if (!interlocutor)
+        return new errors.UserNotFound(request);
 
     for (let index = 0; index < request.body.messages.length; index++) {
         let message = await databaseService.getMessage(request.body.messages[index]);
 
-        if (!message) {
-            new errors.InvalidMessageId(request, request.body.messages[index]);
-
-            return;
-        } else if (message.author !== user.uuid) {
-            new errors.CannotDeleteMessage(request);
-
-            return;
-        }
+        if (!message)
+            return new errors.InvalidMessageId(request, request.body.messages[index]);
+        else if (message.author !== user.uuid)
+            return new errors.CannotDeleteMessage(request);
 
         await databaseService.deleteMessage(request.body.messages[index]);
     }
@@ -668,32 +577,25 @@ httpServer.patch("/messages", async (request, response) => {
     let message = await databaseService.getMessage(request.body.id);
     let receiver = await databaseService.getUserWithUUID(message.receiver);
     
-    if (!message) {
-        new errors.MessageDoesNotExists(request);
-
-        return;
-    } else if (!receiver) {
-        new errors.UserNotFound(request);
-
-        return;
-    } else if (message.author !== user.uuid) {
-        new errors.CannotEditMessage(request);
-        
-        return;
-    }
+    if (!message)
+        return new errors.MessageDoesNotExists(request);
+    else if (!receiver)
+        return new errors.UserNotFound(request);
+    else if (message.author !== user.uuid)
+        return new errors.CannotEditMessage(request);
     
-    await databaseService.editMessage(message._id, request.body.content);
+    await databaseService.editMessage(message.id, request.body.content);
 
     let socket = await findSocket(receiver.uuid);
 
     if (socket) {
         socket.emit("messageEdit", {
-            _id: message._id,
+            id: message.id,
             content: request.body.content
         });
     }
 
-    response.status(204).send();
+    response.sendStatus(204);
 });
 
 httpServer.get("*", (request, response) => {
@@ -702,7 +604,7 @@ httpServer.get("*", (request, response) => {
 
 io.on("connection", async (socket) => {
     socket.data.token = socket.handshake.auth["token"]
-    socket.data.user = await databaseService.getUserWithToken(socket.data.token)
+    socket.data.user = await databaseService.getUserWithToken(socket.data.token, true);
     
     if (socket.data.user === undefined) {
         new errors.NoToken(socket);
@@ -739,7 +641,7 @@ io.on("connection", async (socket) => {
     let users = await databaseService.getUserConversationsWith(socket.data.user.uuid);
     
     users.forEach(user => {
-        socket.join(user);
+        socket.join(user.id);
     });
 
     socket.emit("ready");
@@ -751,46 +653,33 @@ io.on("connection", async (socket) => {
     });
 
     socket.on("markMessageRead", async (request) => {
-        if (!(await databaseService.messageExists(request.id))) {
-            new errors.MessageDoesNotExists(socket);
-
-            return;
-        }
+        if (!(await databaseService.messageExists(request.id)))
+            return new errors.MessageDoesNotExists(socket);
 
         let message = await databaseService.getMessage(request.id);
 
-        if (message.read) {
-            new errors.MessageAlreadyRead(socket);
+        if (message.read)
+            return new errors.MessageAlreadyRead(socket);
+        else if (message.receiver !== socket.data.user.uuid)
+            return new errors.CannotMarkAsReadMessage(socket);
 
-            return;
-        } else if (message.receiver !== socket.data.user.uuid) {
-            new errors.CannotMarkAsReadMessage(socket);
-
-            return;
-        }
-
-        await databaseService.markMessageAsRead(message._id);
+        await databaseService.markMessageAsRead(message.id);
 
         let author = await findSocket(message.author);
         
         if (author) {
             author.emit("readMessage", {
-                _id: message._id
+                id: message.id
             });
         }
     });
 
     socket.on("typing", async (request) => {
         let user = await databaseService.getUserWithUUID(request.user);
-        if (!user) {
-            new errors.UserNotFound(socket);
-
-            return;
-        } else if (!(await databaseService.hasConversationWith(request.user, socket.data.user.uuid))) {
-            new errors.DidNotCreatedConversation(socket);
-
-            return;
-        }
+        if (!user)
+            return new errors.UserNotFound(socket);
+        else if (!(await databaseService.hasConversationWith(request.user, socket.data.user.uuid)))
+            return new errors.DidNotCreatedConversation(socket);
 
         let receiver = await findSocket(user.uuid);
 
@@ -802,13 +691,10 @@ io.on("connection", async (socket) => {
     });
 
     socket.on("changeStatus", async (request) => {
-        if (!(["online", "do not disturb", "hidden"].includes(request.status))) {
-            new errors.InvalidStatus(socket);
-
+        if (!(["online", "do not disturb", "hidden"].includes(request.status)))
+            return new errors.InvalidStatus(socket);
+        else if (socket.data.user.status === request.status)
             return;
-        } else if (socket.data.user.status === request.status) {
-            return;
-        }
 
         await databaseService.updateUserStatus(socket.data.user.uuid, request.status);
         socket.data.user.status = request.status
@@ -847,15 +733,16 @@ async function findSocket(uuid) {
  * 
  * @param {import("express").Request} request 
  * @param {boolean} checkInDatabase 
- * @returns {number | User}
+ * @param {boolean} [full=false] 
+ * @returns {null | User}
  */
-async function checkRequester(request, checkInDatabase = true) {
+async function checkRequester(request, checkInDatabase = true, full=false) {
     if (!request.header("authorization")) {
         throw new errors.NoToken(request);
     }
 
     if (checkInDatabase) {
-        let user = await databaseService.getUserWithToken(request.header("authorization"));
+        let user = await databaseService.getUserWithToken(request.header("authorization"), full);
 
         if (!user) {
             throw new errors.InvalidToken(request);

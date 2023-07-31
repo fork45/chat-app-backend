@@ -16,13 +16,13 @@ export class User {
     constructor(data) {
         this.data = data
 
-        this.uuid = data._id
+        this.uuid = data.id
         this.name = data.name
         this.nickname = data.nickname
-        this.token = data.token
-        this.status = data.status
-        this.conversationsWith = data.conversationsWith
-        this.lastExitTime = data.lastExitTime ? new Date(data.lastExitTime * 1000) : null;
+        this.token = data.token ? data.token : undefined
+        this.status = data.status ? data.status : undefined
+        this.conversationsWith = data.conversationsWith ? data.conversationsWith : undefined;
+        this.lastExitTime = data.lastExitTime ? new Date(data.lastExitTime * 1000) : undefined;
         this.avatar = data.avatar
     }
 

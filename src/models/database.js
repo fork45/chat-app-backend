@@ -33,7 +33,7 @@ export class DatabaseService {
         let userObject;
 
         await this.users.insertOne({
-            _id: uuid,
+            id: uuid,
             name: name,
             nickname: nickname,
             password: passwordHash,
@@ -44,7 +44,7 @@ export class DatabaseService {
             avatar: null,
         }).then(document => {
             userObject = new User({
-                _id: uuid,
+                id: uuid,
                 name: name,
                 nickname: nickname,
                 token: token,
@@ -74,7 +74,7 @@ export class DatabaseService {
         }
 
         await this.users.deleteOne({
-            _id: uuid
+            id: uuid
         });
     }
 
@@ -89,7 +89,7 @@ export class DatabaseService {
         let token = generateToken(id, newPassword);
 
         await this.users.updateOne({
-            _id: id
+            id: id
         }, {
             $set: {
                 password: hash,
@@ -102,7 +102,7 @@ export class DatabaseService {
 
     async changeNickname(id, nickname) {
         await this.users.updateOne({
-            _id: id
+            id: id
         }, {
             $set: {
                 nickname: nickname
@@ -114,10 +114,11 @@ export class DatabaseService {
      * 
      * @param {string} name 
      * @param {string} password 
+     * @param {boolean} [full=false]
      * @returns {[User, string] | [false, string]}
      */
-    async login(name, password) {
-        let user = await this.getUserWithName(name);
+    async login(name, password, full=false) {
+        let user = await this.getUserWithName(name, full);
 
         if (!user) {
             return [false, "no user"];
@@ -129,7 +130,7 @@ export class DatabaseService {
             return [false, "incorrect password"];
         }
 
-        return [token, user];
+        return [user, token];
     }
 
     /**
@@ -137,7 +138,7 @@ export class DatabaseService {
      */
     async changeLastExitTime(user) {
         await this.users.updateOne({
-            _id: user
+            id: user
         }, {
             $set: {
                 lastExitTime: Math.floor(new Date().getTime() / 1000)
@@ -153,6 +154,7 @@ export class DatabaseService {
         let message = await this.messages.findOne({
             $or: [{ author: user }, { receiver: user }]
         }, {
+            _id: false,
             sort: [{ datetime: -1 }]
         });
 
@@ -173,15 +175,29 @@ export class DatabaseService {
             datetime: { $gte: account.lastExitTime.getTime() / 1000 },
             $or: [{ author: account.uuid }, { receiver: account.uuid }]
         }, {
+            _id: false,
             sort: [{ datetime: -1 }]
         });
 
         return await messages.toArray();
     }
 
-    async getUserWithName(name) {
+    /**
+     * 
+     * @param {string} name 
+     * @param {boolean} [full=false]
+     * @returns {Promise<User | null>}
+     */
+    async getUserWithName(name, full=false) {
         let data = await this.users.findOne({
             name: name
+        }, full ? {} : {
+            _id: false,
+            token: false,
+            password: false,
+            lastExitTime: false,
+            conversationsWith: false,
+            status: false
         });
 
         return data ? new User(data) : null;
@@ -190,18 +206,26 @@ export class DatabaseService {
     /**
      * 
      * @param {string} token 
-     * @returns {User | undefined}
+     * @param {boolean} [full=false]
+     * @returns {Promise<User | null>}
      */
-    async getUserWithToken(token) {
+    async getUserWithToken(token, full=false) {
         let tokenHash = crypto.createHash("sha256").update(token).digest("hex").toString();
 
         let user = await this.users.findOne({
             token: tokenHash
+        }, full ? {} : {
+            _id: false,
+            token: false,
+            password: false,
+            lastExitTime: false,
+            conversationsWith: false,
+            status: false
         });
 
-        if (!user) return undefined
+        if (!user) return null;
 
-        user.token = token
+        user.token = full ? token : null;
 
         return new User(user);
     }
@@ -209,12 +233,20 @@ export class DatabaseService {
     /**
      * 
      * @param {UUID} uuid
-     * @returns {User | null}
+     * @param {boolean} [full=false]
+     * @returns {Promise<User | null>}
      */
-    async getUserWithUUID(uuid) {
+    async getUserWithUUID(uuid, full=false) {
         let data = await this.users.findOne({
-            _id:  uuid
-        })
+            id: uuid
+        }, full ? {} : {
+            _id: false,
+            token: false,
+            password: false,
+            lastExitTime: false,
+            conversationsWith: false,
+            status: false
+        });
 
         return data ? new User(data) : undefined;
     }
@@ -226,7 +258,7 @@ export class DatabaseService {
      */
     async updateUserStatus(user, status) {
         await this.users.updateOne({
-            _id: user
+            id: user
         }, {
             $set: {status: status}
         });
@@ -239,7 +271,7 @@ export class DatabaseService {
      */
     async setAvatar(uuid, hash) {
         await this.users.updateOne({
-            _id: uuid
+            id: uuid
         }, {
             $set: { avatar: hash }
         });
@@ -259,6 +291,7 @@ export class DatabaseService {
                 { author: from, receiver: user }
             ],
         }, {
+            _id: false,
             limit: limit,
             sort: [{datetime: -1}]
         });
@@ -268,7 +301,7 @@ export class DatabaseService {
 
     async getUserMessagesAfterMessage(user, from, messageId, limit) {
         let message = await this.messages.findOne({
-            _id: messageId
+            id: messageId
         });
 
         if (!message) {
@@ -284,6 +317,7 @@ export class DatabaseService {
             ],
             datetime: { $gt: message.datetime }
         }, {
+            _id: false,
             limit: limit,
             sort: [{datetime: -1}]
         });
@@ -300,7 +334,7 @@ export class DatabaseService {
     async addMessage(id, author, receiver, content) {
         await this.messages.insertOne({
             type: "message",
-            _id: id,
+            id: id,
             author: author,
             receiver: receiver,
             content: content,
@@ -319,7 +353,7 @@ export class DatabaseService {
     async sendKey(author, receiver, key, iv) {
         await this.messages.insertOne({
             type: "key",
-            _id: generateId(),
+            id: generateId(),
             author: author,
             receiver: receiver,
             content: key,
@@ -333,7 +367,7 @@ export class DatabaseService {
      */
     async deleteMessage(id) {
         await this.messages.deleteOne({
-            _id: id
+            id: id
         });
     }
 
@@ -359,7 +393,7 @@ export class DatabaseService {
     async editMessage(id, content) {
         await this.messages.updateOne({
             type: "message",
-            _id: id
+            id: id
         }, {
             $set: {
                 content: content,
@@ -376,8 +410,8 @@ export class DatabaseService {
     async getMessage(id) {
         let data = await this.messages.findOne({
             type: "message",
-            _id: id
-        })
+            id: id
+        }, {_id: false});
 
         return data ? new Message(data) : undefined;
     }
@@ -407,7 +441,7 @@ export class DatabaseService {
             type: "key",
             author: first_user,
             receiver: second_user
-        });
+        }, {_id: false});
 
         return key;
     }
@@ -419,7 +453,7 @@ export class DatabaseService {
     async messageExists(id) {
         let count = await this.messages.countDocuments({
             type: "message",
-            _id: id
+            id: id
         });
 
         return count >= 1 ? true : false;
@@ -432,7 +466,7 @@ export class DatabaseService {
      */
     async addConversationToUser(user, secondUser) {
         await this.users.updateOne({
-            _id: user,
+            id: user,
         }, {
             "$push": { conversationsWith: secondUser }
         });
@@ -445,7 +479,7 @@ export class DatabaseService {
      */
     async removeConversationFromUser(user, secondUser) {
         await this.users.updateOne({
-            _id: user,
+            id: user,
         }, {
             $pull: { conversationsWith: secondUser }
         });
@@ -457,7 +491,7 @@ export class DatabaseService {
      */
     async hasConversationWith(user, secondUser) {
         let count = await this.users.countDocuments({
-            _id: user,
+            id: user,
             conversationsWith: { "$in": [secondUser] }
         })
 
@@ -474,45 +508,74 @@ export class DatabaseService {
             type: "key",
             author: user,
             receiver: secondUser
-        })
+        });
 
         return key ? true : false;
     }
 
+    /**
+     * 
+     * @param {import("crypto").UUID} user 
+     * @returns {Object[]}
+     */
     async findWaitingUsers(user) {
         let conversations = await this.getUserConversationsWith(user);
 
         // Find users that have user in their list
-
-
         let users = await this.users.find({
             conversationsWith: { $in: user }
+        }, {
+            id: true,
+            name: true,
+            nickname: true,
+            avatar: true
         });
 
-        return users.filter(user => !conversations.includes(user));
+        let waiting = users.filter(user => !conversations.includes(user));
+
+        return waiting.toArray();
     }
 
     /**
      * 
      * @param {string} user
-     * @returns {Object[]} 
-    */
-    async getUserConversationsWith(user) {
-        let account = await this.users.findOne({
-            _id: user,
+     * @param {boolean} [full=false] 
+     * @returns {Promise<Object[]>} 
+     */
+    async getUserConversationsWith(user, full=false) {
+        let conversationsWith = await this.users.findOne({
+            id: user,
+        }, {
+            conversationsWith: true
+        });
+        
+        if (!conversationsWith) {
+            return [];
+        }
+
+        conversationsWith.map(async (id) => {
+            return await this.users.findOne({
+                id: id
+            }, full ? {} : {
+                _id: false,
+                token: false,
+                password: false,
+                lastExitTime: false,
+                conversationsWith: false,
+                status: false
+            });
         });
 
-        return account.conversationsWith;
+        return conversationsWith;
     }
 
     /**
      * 
      * @param {string} id
-     * 
      */
     async markMessageAsRead(id) {
         await this.messages.updateOne({
-            _id: id,
+            id: id,
         }, {
             $set: {
                 read: true
