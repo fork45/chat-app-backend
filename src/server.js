@@ -28,14 +28,14 @@ httpServer.get("/@me", async (request, response) => {
     response.json(user.data);
 });
 
-httpServer.delete("/@me", async (request, response) => {
+httpServer.delete("/@me/:password", async (request, response) => {
     try {
         var user = await checkRequester(request);
     } catch (error) {
         return;
     }
 
-    if (!request.body.password)
+    if (!request.params.password)
         return new errors.IncorrectPassword(request);
 
     let [successful, message] = await databaseService.login(user.name, request.body.password);
@@ -95,6 +95,9 @@ httpServer.patch("/@me/password", async (request, response) => {
     if (!successful)
         return new errors.IncorrectPassword(request);
 
+    if (request.body.new.length < 8)
+        return new errors.InvalidPasswordLength(request);
+    
     let token = await databaseService.changePassword(user.uuid, request.body.new);
 
     response.json({
@@ -355,8 +358,8 @@ httpServer.post("/key", async (request, response) => {
 
     if (socket) {
         socket.emit("conversationKey", {
-            key: request.body.key,
-            user: user.uuid
+            user: user.uuid,
+            key: request.body.key
         });
     }
 
@@ -524,7 +527,7 @@ httpServer.delete("/messages/:message", async (request, response) => {
     response.sendStatus(204);
 });
 
-httpServer.post("/:user/messages/purge", async (request, response) => {
+httpServer.post("/:user/messages/bulk", async (request, response) => {
     if (request.body.messages.length > 100 || request.body.messages.length < 2)
         return new errors.InvalidMessagesNumber(request);
 
@@ -555,6 +558,7 @@ httpServer.post("/:user/messages/purge", async (request, response) => {
 
     if (interlocutor) {
         interlocutor.emit("deleteMessages", {
+            user: user.uuid,
             messages: request.body.messages
         });
     }
@@ -615,10 +619,10 @@ io.on("connection", async (socket) => {
     }
 
     let waitingUsers = await databaseService.findWaitingUsers(socket.data.user.uuid);
-    socket.emit("waitingUsers", waitingUsers);
+    socket.emit("waitingUsers", { users: waitingUsers });
 
     let messages = await databaseService.getUserMessagesAfterExitTime(socket.data.user.uuid);
-    socket.emit("newMessages", messages);
+    socket.emit("newMessages", { messages: messages });
 
     let friends = (await io.in(socket.data.user.uuid).fetchSockets());
 
